@@ -64,7 +64,7 @@ export const Step1PersonalDetails: React.FC<Step1Props> = ({
                   whatsappNumber: formData.whatsappSameAsMobile ? val : formData.whatsappNumber
                 });
               }}
-              placeholder="9876543210"
+              placeholder="e.g. 9876543210"
               className="w-full px-4 py-3 text-sm focus:outline-none"
             />
           </div>
@@ -97,7 +97,7 @@ export const Step1PersonalDetails: React.FC<Step1Props> = ({
             disabled={formData.whatsappSameAsMobile}
             value={formData.whatsappNumber}
             onChange={(e) => updateFormData({ whatsappNumber: e.target.value })}
-            placeholder="9876543210"
+            placeholder="e.g. 9876543210"
             className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:bg-slate-50 disabled:text-slate-500"
           />
         </div>
@@ -177,8 +177,8 @@ export const Step1PersonalDetails: React.FC<Step1Props> = ({
                 if (code.startsWith('5')) updateFormData({ city: 'Hyderabad', state: 'Telangana' });
               }
             }}
-            placeholder="400000"
-            className="w-full px-4 py-3 rounded-xl border border-blue-600 bg-blue-50/20 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-600"
+            placeholder="e.g. 400000"
+            className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-600"
           />
           <p className="text-[11px] text-slate-400 mt-1">Enter a valid 6-digit pin code.</p>
         </div>

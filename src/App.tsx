@@ -23,7 +23,7 @@ export function App() {
     resetForm
   } = useRegistrationStore();
 
-  const [viewMode, setViewMode] = useState<'landing' | 'registration'>('registration');
+  const [viewMode, setViewMode] = useState<'landing' | 'registration'>('landing');
 
   const handleStartRegistration = () => {
     setViewMode('registration');

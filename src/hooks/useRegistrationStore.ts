@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { RegistrationFormData, RegistrationStep } from '../types';
 
-const STORAGE_KEY = 'yes_dhobi_partner_registration_v2';
-const STEP_KEY = 'yes_dhobi_partner_step_v2';
+const STORAGE_KEY = 'yes_dhobi_partner_registration_v3';
+const STEP_KEY = 'yes_dhobi_partner_step_v3';
 
 export const initialServicesData = {
   wash_fold: {

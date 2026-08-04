@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Header } from './Header';
 import { Footer } from './Footer';
-import heroWorkerImg from '../assets/images/hero_laundry_worker_1785828128314.jpg';
+import heroWorkerImg from '../assets/images/hero_laundry_worker_1785828128314.png';
 
 interface LandingPageProps {
   onStartRegistration: () => void;
@@ -92,14 +92,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
           </div>
 
           {/* Right Column Monochrome Graphic Frame */}
-          <div className="lg:col-span-5 flex justify-center">
-            <div className="w-full max-w-md rounded-2xl border border-slate-700/80 shadow-2xl overflow-hidden bg-slate-900 relative">
+          <div className="lg:col-span-5 flex justify-center lg:justify-end items-center">
+            <div className="w-full max-w-md lg:max-w-lg rounded-2xl border border-slate-700/80 shadow-2xl overflow-hidden bg-slate-900 relative aspect-[4/3] sm:aspect-[1/1] lg:aspect-[4/3]">
               <img
                 src={heroWorkerImg}
                 alt="Dhobi Laundry Worker Operating Washing Machines"
-                className="w-full h-80 sm:h-[420px] object-cover filter grayscale contrast-125"
+                className="w-full h-full object-cover object-center filter grayscale contrast-125"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-transparent to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-transparent to-transparent pointer-events-none" />
             </div>
           </div>
         </div>

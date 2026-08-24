@@ -111,10 +111,27 @@ export const Footer: React.FC<FooterProps> = ({ onStartRegistration }) => {
           </div>
         </div>
 
+        {/* Company Registration Details */}
+        <div className="border-t border-slate-800/80 mt-10 pt-6 text-[11px] text-slate-400 space-y-2">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+            <span className="font-semibold text-slate-300">
+              Vastra Solutions Private Limited
+            </span>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-400">
+              <span>CIN: <strong className="text-slate-300 font-medium">U96010TS2025PTC206837</strong></span>
+              <span>GSTIN: <strong className="text-slate-300 font-medium">36AALCV6093Q1Z9</strong></span>
+              <span>Contact: <a href="tel:+918501020205" className="text-slate-300 font-medium hover:text-yellow-400 transition-colors">+91 85010 20205</a></span>
+            </div>
+          </div>
+          <p className="text-slate-400 text-[10px] leading-relaxed">
+            Registered Office: H.No. 11-13-608/1, Road No. 17, Alkapuri Colony, Saroornagar, Ranga Reddy District, Hyderabad, Telangana - 500102.
+          </p>
+        </div>
+
         {/* Bottom Bar */}
-        <div className="border-t border-slate-800/80 mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-400">
+        <div className="border-t border-slate-800/60 mt-4 pt-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-400">
           <div>
-            © 2026 Yes Dhobi Technologies. All rights reserved.
+            © 2026 Yes Dhobi. All rights reserved by Vastra Solutions Private Limited.
           </div>
           <div className="flex items-center gap-6">
             <a href="#terms" className="hover:text-slate-200 transition-colors">Terms of Service</a>

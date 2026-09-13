@@ -114,7 +114,7 @@ export const Footer: React.FC<FooterProps> = ({ onStartRegistration }) => {
         {/* Bottom Bar */}
         <div className="border-t border-slate-800/80 mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-400">
           <div>
-            © 2026. All rights reserved by Vastra Solutions Private Limited.
+            © 2026. All rights reserved by Yesdhobi.com
           </div>
           <div className="flex items-center gap-6">
             <a href="#terms" className="hover:text-slate-200 transition-colors">Terms of Service</a>

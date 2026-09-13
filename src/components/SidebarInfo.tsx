@@ -1,6 +1,7 @@
 import React from 'react';
-import { RotateCw, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 import { RegistrationStep } from '../types';
+import { YesDhobiLogo } from './YesDhobiLogo';
 
 interface SidebarInfoProps {
   currentStep: RegistrationStep;
@@ -52,14 +53,11 @@ export const SidebarInfo: React.FC<SidebarInfoProps> = ({ currentStep }) => {
     <div className="w-full lg:w-80 flex-shrink-0 bg-[#EEF5FF] border border-blue-100/80 rounded-2xl p-6 flex flex-col justify-between">
       <div>
         {/* Top Header Badge */}
-        <div className="flex items-center gap-2.5 mb-6">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white">
-            <RotateCw className="w-4 h-4 stroke-[2.5]" />
+        <div className="flex flex-col gap-1.5 mb-6">
+          <div className="flex items-center">
+            <YesDhobiLogo className="h-6.5 w-auto" />
           </div>
-          <div>
-            <h4 className="text-sm font-bold text-slate-900 leading-none">Yes Dhobi</h4>
-            <span className="text-[11px] font-medium text-slate-500">Vendor Registration</span>
-          </div>
+          <span className="text-[11px] font-medium text-slate-500">Vendor Registration</span>
         </div>
 
         {/* Title & Subtitle */}

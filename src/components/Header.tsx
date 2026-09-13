@@ -1,5 +1,5 @@
 import React from 'react';
-import { RotateCw, ShieldCheck } from 'lucide-react';
+import { YesDhobiLogo } from './YesDhobiLogo';
 
 interface HeaderProps {
   onNavigateHome?: () => void;
@@ -18,16 +18,10 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand Logo */}
         <button
           onClick={onNavigateHome}
-          className="flex items-center gap-3 text-left focus:outline-none cursor-pointer group"
+          className="flex items-center text-left focus:outline-none cursor-pointer group transition-opacity hover:opacity-90"
+          aria-label="Yes Dhobi Home"
         >
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:bg-blue-700 transition-colors">
-            <RotateCw className="w-6 h-6 stroke-[2.5]" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-              Yes Dhobi
-            </span>
-          </div>
+          <YesDhobiLogo className="h-8 sm:h-9.5 w-auto" />
         </button>
 
         {/* Center Nav Links (only on Home view) */}

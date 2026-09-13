@@ -1,5 +1,6 @@
 import React from 'react';
-import { RotateCw, ShieldCheck, Zap, Headphones, Briefcase } from 'lucide-react';
+import { ShieldCheck, Zap, Headphones, Briefcase } from 'lucide-react';
+import { YesDhobiLogo } from './YesDhobiLogo';
 
 interface FooterProps {
   onStartRegistration?: () => void;
@@ -39,13 +40,8 @@ export const Footer: React.FC<FooterProps> = ({ onStartRegistration }) => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Brand & Subtext */}
           <div className="lg:col-span-8 space-y-4">
-            <div className="flex items-center gap-3 text-white font-black text-xl">
-              <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md">
-                <RotateCw className="w-5.5 h-5.5 stroke-[2.5]" />
-              </div>
-              <span className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                Yes Dhobi
-              </span>
+            <div className="flex items-center">
+              <YesDhobiLogo variant="white" className="h-8 sm:h-9 w-auto" />
             </div>
             <p className="text-slate-400 text-xs sm:text-sm leading-relaxed max-w-lg">
               Connecting storefronts directly with thousands of household customers across your neighborhood daily.

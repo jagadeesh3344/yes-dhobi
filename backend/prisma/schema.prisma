@@ -1,0 +1,945 @@
+// Yes Dhobi platform data model.
+// Serves: customer app (Flutter), rider/vendor app (Flutter), vendor web
+// registration (React) and the admin panel (React).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  CUSTOMER
+  VENDOR
+  RIDER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+}
+
+model User {
+  id           String     @id @default(cuid())
+  role         Role
+  /// E.164, e.g. +919876543210
+  phone        String?
+  email        String?
+  passwordHash String?
+  name         String
+  avatarUrl    String?
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  customer              Customer?
+  rider                 Rider?
+  vendor                Vendor?
+  refreshTokens         RefreshToken[]
+  deviceTokens          DeviceToken[]
+  notifications         Notification[]
+  tickets               SupportTicket[] @relation("TicketCreator")
+  assignedTickets       SupportTicket[] @relation("TicketAssignee")
+  ticketMessages        TicketMessage[]
+  orderEvents           OrderEvent[]
+  verifications         Verification[]  @relation("VerificationSubject")
+  reviewedVerifications Verification[]  @relation("VerificationReviewer")
+
+  @@unique([phone, role])
+  @@unique([email, role])
+  @@index([role, status])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+enum OtpPurpose {
+  LOGIN
+  PASSWORD_RESET
+  PHONE_VERIFY
+}
+
+model OtpCode {
+  id         String     @id @default(cuid())
+  phone      String
+  purpose    OtpPurpose
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int        @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  @@index([phone, purpose])
+}
+
+model DeviceToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  platform  String   @default("android")
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Geography
+// ---------------------------------------------------------------------------
+
+model Zone {
+  id        Int      @id @default(autoincrement())
+  name      String
+  city      String
+  state     String?
+  centerLat Float?
+  centerLng Float?
+  radiusKm  Float?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  riders  Rider[]
+  vendors VendorZone[]
+  orders  Order[]
+
+  @@unique([name, city])
+}
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+
+enum CustomerTier {
+  REGULAR
+  VIP
+}
+
+model Customer {
+  id               String       @id @default(cuid())
+  userId           String       @unique
+  walletBalance    Decimal      @default(0) @db.Decimal(12, 2)
+  tier             CustomerTier @default(REGULAR)
+  city             String?
+  referralCode     String       @unique
+  referredById     String?
+  defaultAddressId String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referredBy         Customer?             @relation("Referrals", fields: [referredById], references: [id])
+  referrals          Customer[]            @relation("Referrals")
+  addresses          Address[]
+  orders             Order[]
+  payments           Payment[]
+  walletTransactions WalletTransaction[]
+  promoRedemptions   PromotionRedemption[]
+}
+
+model Address {
+  id         String   @id @default(cuid())
+  customerId String
+  label      String   @default("Home")
+  line1      String
+  line2      String?
+  landmark   String?
+  city       String
+  state      String?
+  pincode    String
+  lat        Float?
+  lng        Float?
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orders   Order[]
+
+  @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// Riders
+// ---------------------------------------------------------------------------
+
+enum RiderVehicle {
+  MOTORCYCLE
+  SCOOTER
+  BICYCLE
+  ELECTRIC_BIKE
+  VAN
+}
+
+enum RiderAvailability {
+  ONLINE
+  OFFLINE
+  ON_DELIVERY
+}
+
+enum RiderOnboardingStatus {
+  PERSONAL_DETAILS
+  VEHICLE_DETAILS
+  DOCUMENTS
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model Rider {
+  id                   String                @id @default(cuid())
+  userId               String                @unique
+  dateOfBirth          DateTime?
+  vehicleType          RiderVehicle          @default(MOTORCYCLE)
+  vehicleNumber        String?
+  drivingLicenseNumber String?
+  panNumber            String?
+  aadhaarNumber        String?
+  bankAccountNumber    String?
+  ifscCode             String?
+  bankName             String?
+  upiId                String?
+  zoneId               Int?
+  availability         RiderAvailability     @default(OFFLINE)
+  onboardingStatus     RiderOnboardingStatus @default(PERSONAL_DETAILS)
+  currentLat           Float?
+  currentLng           Float?
+  lastLocationAt       DateTime?
+  rating               Float                 @default(5)
+  ratingCount          Int                   @default(0)
+  totalDeliveries      Int                   @default(0)
+  /// { profilePhoto, drivingLicense, aadhaarFront, aadhaarBack, selfie }
+  documents            Json                  @default("{}")
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  zone           Zone?           @relation(fields: [zoneId], references: [id])
+  pickupOrders   Order[]         @relation("PickupRider")
+  deliveryOrders Order[]         @relation("DeliveryRider")
+  pickupRequests PickupRequest[]
+  ledgerEntries  LedgerEntry[]
+  payouts        Payout[]
+  verifications  Verification[]
+
+  @@index([availability, zoneId])
+}
+
+// ---------------------------------------------------------------------------
+// Vendors (laundry partners)
+// ---------------------------------------------------------------------------
+
+enum VendorStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  REJECTED
+}
+
+model Vendor {
+  id                         String       @id @default(cuid())
+  userId                     String       @unique
+  shopName                   String
+  ownerName                  String
+  whatsappNumber             String?
+  // personal
+  dateOfBirth                DateTime?
+  gender                     String?
+  aadhaarNumber              String?
+  personalAddress            String?
+  personalCity               String?
+  personalState              String?
+  personalPincode            String?
+  // business
+  businessType               String?
+  isExistingFranchise        Boolean      @default(false)
+  franchiseName              String?
+  yearsOfExperience          Int?
+  numberOfWorkers            Int?
+  hasOwnShop                 Boolean?
+  shopAreaSqft               Float?
+  numberOfWashingMachines    Int?
+  dailyCapacityKg            Float        @default(50)
+  gstNumber                  String?
+  panNumber                  String?
+  standardDeliveryTime       String?
+  offersExpressDelivery      Boolean      @default(false)
+  expressChargePercent       Float?
+  // location
+  shopAddress                String
+  landmark                   String?
+  pincode                    String?
+  city                       String
+  state                      String?
+  latitude                   Float?
+  longitude                  Float?
+  serviceRadiusKm            Float        @default(5)
+  workingHoursFrom           String       @default("08:00:00")
+  workingHoursTo             String       @default("21:00:00")
+  /// ISO weekday numbers 1 (Mon) .. 7 (Sun)
+  workingDays                Int[]        @default([1, 2, 3, 4, 5, 6])
+  // bank
+  bankAccountHolderName      String?
+  bankName                   String?
+  bankAccountNumber          String?
+  bankIfscCode               String?
+  bankAccountType            String?
+  /// { aadhaarFront, aadhaarBack, panFront, shopPhoto, gstCertificate, tradeLicense, labourLicense, cancelledCheque, profilePhoto }
+  documents                  Json         @default("{}")
+  // platform
+  commissionRate             Float        @default(20)
+  status                     VendorStatus @default(PENDING_VERIFICATION)
+  rating                     Float        @default(5)
+  ratingCount                Int          @default(0)
+  agreedToPartnerTerms       Boolean      @default(false)
+  agreedToPaymentTerms       Boolean      @default(false)
+  consentedToBackgroundCheck Boolean      @default(false)
+  registrationPayload        Json?
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  zones         VendorZone[]
+  services      VendorService[]
+  equipments    VendorEquipment[]
+  orders        Order[]
+  ledgerEntries LedgerEntry[]
+  payouts       Payout[]
+  verifications Verification[]
+
+  @@index([status, city])
+}
+
+model VendorZone {
+  vendorId String
+  zoneId   Int
+  vendor   Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  zone     Zone   @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@id([vendorId, zoneId])
+}
+
+model Equipment {
+  id      Int               @id @default(autoincrement())
+  name    String            @unique
+  vendors VendorEquipment[]
+}
+
+model VendorEquipment {
+  vendorId    String
+  equipmentId Int
+  quantity    Int       @default(1)
+  vendor      Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  equipment   Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@id([vendorId, equipmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+enum RateUnit {
+  KG
+  ITEM
+  PAIR
+  SPOT
+}
+
+model ServiceCategory {
+  id            Int      @id @default(autoincrement())
+  /// stable machine code used by the web app, e.g. wash_fold
+  code          String   @unique
+  name          String
+  description   String   @default("")
+  rateUnit      RateUnit @default(ITEM)
+  basePrice     Decimal  @default(0) @db.Decimal(10, 2)
+  leadTimeHours Int      @default(24)
+  iconName      String   @default("Shirt")
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items          CatalogItem[]
+  vendorServices VendorService[]
+}
+
+model CatalogItem {
+  id                String   @id @default(cuid())
+  /// stable code used by the customer app, e.g. wf_1
+  code              String   @unique
+  serviceCategoryId Int
+  name              String
+  price             Decimal  @db.Decimal(10, 2)
+  unit              String   @default("pc")
+  iconKey           String   @default("shirt")
+  isActive          Boolean  @default(true)
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  serviceCategory ServiceCategory @relation(fields: [serviceCategoryId], references: [id])
+  orderItems      OrderItem[]
+
+  @@index([serviceCategoryId, isActive])
+}
+
+model VendorService {
+  id                String   @id @default(cuid())
+  vendorId          String
+  serviceCategoryId Int?
+  /// only for custom (non-catalog) services
+  customName        String?
+  price             Decimal  @db.Decimal(10, 2)
+  unit              String   @default("kg")
+  isEnabled         Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  vendor          Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  serviceCategory ServiceCategory? @relation(fields: [serviceCategoryId], references: [id])
+
+  @@unique([vendorId, serviceCategoryId])
+  @@index([vendorId])
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+enum OrderStatus {
+  PENDING_PICKUP
+  ASSIGNED
+  PICKED_UP
+  IN_LAUNDRY
+  WASHING
+  IRONING
+  QUALITY_CHECK
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  UPI
+  CARD
+  COD
+  WALLET
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+model Order {
+  id                  String        @id @default(cuid())
+  orderNumber         String        @unique
+  customerId          String
+  addressId           String?
+  vendorId            String?
+  pickupRiderId       String?
+  deliveryRiderId     String?
+  zoneId              Int?
+  status              OrderStatus   @default(PENDING_PICKUP)
+  // snapshot of the pickup/delivery address
+  addressLine         String
+  addressLat          Float?
+  addressLng          Float?
+  pincode             String?
+  city                String?
+  // scheduling
+  pickupDate          DateTime
+  pickupSlot          String
+  isExpress           Boolean       @default(false)
+  deliveryEta         DateTime?
+  pickedUpAt          DateTime?
+  deliveredAt         DateTime?
+  cancelledAt         DateTime?
+  cancelReason        String?
+  vendorAcceptedAt    DateTime?
+  notes               String?
+  // description
+  serviceSummary      String
+  itemsCount          Int
+  itemsDescription    String
+  estimatedWeightKg   Float?
+  /// recorded by the rider at the doorstep
+  actualWeightKg      Float?
+  distanceKm          Float?
+  // money
+  subtotal            Decimal       @db.Decimal(12, 2)
+  discount            Decimal       @default(0) @db.Decimal(12, 2)
+  surcharge           Decimal       @default(0) @db.Decimal(12, 2)
+  deliveryFee         Decimal       @default(0) @db.Decimal(12, 2)
+  tax                 Decimal       @default(0) @db.Decimal(12, 2)
+  total               Decimal       @db.Decimal(12, 2)
+  promoCode           String?
+  promotionId         String?
+  paymentMethod       PaymentMethod @default(COD)
+  paymentStatus       PaymentStatus @default(PENDING)
+  riderPickupPayout   Decimal       @default(0) @db.Decimal(12, 2)
+  riderDeliveryPayout Decimal       @default(0) @db.Decimal(12, 2)
+  vendorEarning       Decimal       @default(0) @db.Decimal(12, 2)
+  platformCommission  Decimal       @default(0) @db.Decimal(12, 2)
+  // handoff OTPs (4 digits)
+  customerPickupOtp   String
+  vendorDropOtp       String
+  vendorHandoverOtp   String
+  customerDeliveryOtp String
+  // feedback
+  rating              Int?
+  ratingComment       String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  customer       Customer              @relation(fields: [customerId], references: [id])
+  address        Address?              @relation(fields: [addressId], references: [id])
+  vendor         Vendor?               @relation(fields: [vendorId], references: [id])
+  pickupRider    Rider?                @relation("PickupRider", fields: [pickupRiderId], references: [id])
+  deliveryRider  Rider?                @relation("DeliveryRider", fields: [deliveryRiderId], references: [id])
+  zone           Zone?                 @relation(fields: [zoneId], references: [id])
+  promotion      Promotion?            @relation(fields: [promotionId], references: [id])
+  items          OrderItem[]
+  events         OrderEvent[]
+  pickupRequests PickupRequest[]
+  payments       Payment[]
+  walletTxns     WalletTransaction[]
+  ledgerEntries  LedgerEntry[]
+  tickets        SupportTicket[]
+  redemptions    PromotionRedemption[]
+
+  @@index([customerId, createdAt])
+  @@index([vendorId, status])
+  @@index([pickupRiderId])
+  @@index([deliveryRiderId])
+  @@index([status, createdAt])
+}
+
+model OrderItem {
+  id            String  @id @default(cuid())
+  orderId       String
+  catalogItemId String?
+  name          String
+  serviceName   String
+  quantity      Float
+  unit          String  @default("pc")
+  unitPrice     Decimal @db.Decimal(10, 2)
+  lineTotal     Decimal @db.Decimal(12, 2)
+
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  catalogItem CatalogItem? @relation(fields: [catalogItemId], references: [id])
+
+  @@index([orderId])
+}
+
+model OrderEvent {
+  id          String       @id @default(cuid())
+  orderId     String
+  status      OrderStatus?
+  type        String
+  title       String
+  description String?
+  actorUserId String?
+  meta        Json?
+  createdAt   DateTime     @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorUserId], references: [id])
+
+  @@index([orderId, createdAt])
+}
+
+enum RequestLeg {
+  PICKUP
+  DELIVERY
+}
+
+enum PickupRequestStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+model PickupRequest {
+  id          String              @id @default(cuid())
+  orderId     String
+  riderId     String
+  leg         RequestLeg
+  status      PickupRequestStatus @default(OFFERED)
+  payout      Decimal             @db.Decimal(10, 2)
+  distanceKm  Float?
+  offeredAt   DateTime            @default(now())
+  expiresAt   DateTime
+  respondedAt DateTime?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  rider Rider @relation(fields: [riderId], references: [id], onDelete: Cascade)
+
+  @@index([riderId, status])
+  @@index([orderId, leg, status])
+}
+
+// ---------------------------------------------------------------------------
+// Pricing rules
+// ---------------------------------------------------------------------------
+
+enum PromotionType {
+  PERCENTAGE
+  FLAT
+  FREE_DELIVERY
+}
+
+model Promotion {
+  id             String        @id @default(cuid())
+  code           String        @unique
+  title          String
+  description    String?
+  type           PromotionType
+  discountValue  Decimal       @default(0) @db.Decimal(10, 2)
+  minOrder       Decimal       @default(0) @db.Decimal(10, 2)
+  maxDiscount    Decimal?      @db.Decimal(10, 2)
+  /// null = unlimited
+  maxUses        Int?
+  usedCount      Int           @default(0)
+  perUserLimit   Int           @default(1)
+  firstOrderOnly Boolean       @default(false)
+  validFrom      DateTime      @default(now())
+  validUntil     DateTime
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  orders      Order[]
+  redemptions PromotionRedemption[]
+}
+
+model PromotionRedemption {
+  id          String   @id @default(cuid())
+  promotionId String
+  customerId  String
+  orderId     String
+  amount      Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  customer  Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([promotionId, customerId])
+}
+
+enum SurchargeKind {
+  MULTIPLIER
+  FLAT
+  PERCENT_DISCOUNT
+}
+
+enum SurchargeCondition {
+  EXPRESS_SELECTED
+  SUNDAY_PICKUP
+  WEIGHT_OVER
+  HOLIDAY
+  ALWAYS
+}
+
+model SurchargeRule {
+  id          String             @id @default(cuid())
+  name        String
+  description String             @default("")
+  kind        SurchargeKind
+  value       Decimal            @db.Decimal(10, 2)
+  condition   SurchargeCondition
+  threshold   Float?
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Money movement
+// ---------------------------------------------------------------------------
+
+model Payment {
+  id                String        @id @default(cuid())
+  orderId           String
+  customerId        String
+  method            PaymentMethod
+  status            PaymentStatus @default(PENDING)
+  amount            Decimal       @db.Decimal(12, 2)
+  provider          String        @default("mock")
+  providerOrderId   String?
+  providerPaymentId String?
+  meta              Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([orderId])
+}
+
+enum WalletTxnType {
+  TOPUP
+  ORDER_PAYMENT
+  REFUND
+  REFERRAL_BONUS
+  ADJUSTMENT
+}
+
+model WalletTransaction {
+  id           String        @id @default(cuid())
+  customerId   String
+  orderId      String?
+  type         WalletTxnType
+  /// signed: positive credit, negative debit
+  amount       Decimal       @db.Decimal(12, 2)
+  balanceAfter Decimal       @db.Decimal(12, 2)
+  description  String
+  createdAt    DateTime      @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order    Order?   @relation(fields: [orderId], references: [id])
+
+  @@index([customerId, createdAt])
+}
+
+enum PartyType {
+  VENDOR
+  RIDER
+}
+
+enum LedgerKind {
+  ORDER_EARNING
+  PAYOUT
+  ADJUSTMENT
+}
+
+model LedgerEntry {
+  id          String     @id @default(cuid())
+  partyType   PartyType
+  vendorId    String?
+  riderId     String?
+  orderId     String?
+  payoutId    String?
+  kind        LedgerKind
+  /// signed: earnings positive, payouts negative
+  amount      Decimal    @db.Decimal(12, 2)
+  description String
+  createdAt   DateTime   @default(now())
+
+  vendor Vendor? @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  rider  Rider?  @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  order  Order?  @relation(fields: [orderId], references: [id])
+  payout Payout? @relation(fields: [payoutId], references: [id])
+
+  @@index([vendorId, createdAt])
+  @@index([riderId, createdAt])
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+model Payout {
+  id            String       @id @default(cuid())
+  payoutNumber  String       @unique
+  partyType     PartyType
+  vendorId      String?
+  riderId       String?
+  amount        Decimal      @db.Decimal(12, 2)
+  status        PayoutStatus @default(PENDING)
+  method        String       @default("UPI Instant")
+  accountMasked String?
+  reference     String?
+  failureReason String?
+  requestedAt   DateTime     @default(now())
+  processedAt   DateTime?
+
+  vendor        Vendor?       @relation(fields: [vendorId], references: [id])
+  rider         Rider?        @relation(fields: [riderId], references: [id])
+  ledgerEntries LedgerEntry[]
+
+  @@index([status, requestedAt])
+}
+
+// ---------------------------------------------------------------------------
+// KYC verification
+// ---------------------------------------------------------------------------
+
+enum VerificationStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model Verification {
+  id              String             @id @default(cuid())
+  type            PartyType
+  userId          String
+  vendorId        String?
+  riderId         String?
+  status          VerificationStatus @default(PENDING_REVIEW)
+  idNumber        String?
+  /// { docKey: url }
+  documents       Json               @default("{}")
+  rejectionReason String?
+  submittedAt     DateTime           @default(now())
+  reviewedAt      DateTime?
+  reviewedById    String?
+
+  user       User    @relation("VerificationSubject", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User?   @relation("VerificationReviewer", fields: [reviewedById], references: [id])
+  vendor     Vendor? @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  rider      Rider?  @relation(fields: [riderId], references: [id], onDelete: Cascade)
+
+  @@index([status, submittedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Support
+// ---------------------------------------------------------------------------
+
+enum TicketCategory {
+  DAMAGE
+  DELAY
+  PAYOUT
+  APP_BUG
+  REFUND
+  DELIVERY
+  QUALITY
+  OTHER
+}
+
+enum TicketPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+model SupportTicket {
+  id           String         @id @default(cuid())
+  ticketNumber String         @unique
+  subject      String
+  category     TicketCategory @default(OTHER)
+  priority     TicketPriority @default(MEDIUM)
+  status       TicketStatus   @default(OPEN)
+  createdById  String
+  creatorRole  Role
+  orderId      String?
+  assignedToId String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  resolvedAt   DateTime?
+
+  createdBy  User            @relation("TicketCreator", fields: [createdById], references: [id])
+  assignedTo User?           @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  order      Order?          @relation(fields: [orderId], references: [id])
+  messages   TicketMessage[]
+
+  @@index([status, priority])
+  @@index([createdById])
+}
+
+model TicketMessage {
+  id         String   @id @default(cuid())
+  ticketId   String
+  senderId   String?
+  senderName String
+  text       String
+  isStaff    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender User?         @relation(fields: [senderId], references: [id])
+
+  @@index([ticketId, createdAt])
+}
+
+model Faq {
+  id        String  @id @default(cuid())
+  category  String
+  question  String
+  answer    String
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+}
+
+// ---------------------------------------------------------------------------
+// Notifications & settings
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  ORDER
+  RIDER
+  VENDOR
+  SUPPORT
+  SYSTEM
+  PROMO
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType @default(SYSTEM)
+  read      Boolean          @default(false)
+  data      Json?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+}
+
+model PlatformSettings {
+  id                         Int      @id @default(1)
+  brandName                  String   @default("Yes Dhobi Technologies Pvt Ltd")
+  supportEmail               String   @default("support@yesdhobi.com")
+  supportPhone               String   @default("1800-YES-DHOBI")
+  operatingHours             String   @default("06:00 AM - 11:00 PM")
+  vendorCommissionRate       Float    @default(20)
+  riderBaseFee               Float    @default(40)
+  riderPerKmRate             Float    @default(5)
+  deliveryFee                Float    @default(49)
+  minOrderForFreePickup      Float    @default(120)
+  taxPercent                 Float    @default(0)
+  referralBonus              Float    @default(50)
+  maintenanceMode            Boolean  @default(false)
+  riderOutOfServiceAlert     Boolean  @default(true)
+  smsNotificationsOnDelivery Boolean  @default(true)
+  updatedAt                  DateTime @updatedAt
+}

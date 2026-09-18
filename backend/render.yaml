@@ -1,0 +1,35 @@
+# Render Blueprint: creates the API web service. Add DATABASE_URL (Supabase pooler URI)
+# and the S3_* / SMS settings in the Render dashboard after the first deploy.
+services:
+  - type: web
+    name: yesdhobi-api
+    runtime: docker
+    # the API lives in the backend/ folder of the yes-dhobi monorepo
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: OTP_DEV_MODE
+        value: "false"
+      - key: SMS_PROVIDER
+        value: console
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: PUBLIC_BASE_URL
+        value: https://yesdhobi-api.onrender.com
+      - key: SEED_ADMIN_EMAIL
+        value: admin@yesdhobi.com
+      - key: SEED_ADMIN_PASSWORD
+        sync: false

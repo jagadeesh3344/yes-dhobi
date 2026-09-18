@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: yesdhobi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yesdhobi
+      POSTGRES_PASSWORD: yesdhobi
+      POSTGRES_DB: yesdhobi
+    ports:
+      - "5432:5432"
+    volumes:
+      - yesdhobi_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yesdhobi -d yesdhobi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: yesdhobi-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://yesdhobi:yesdhobi@db:5432/yesdhobi?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access-secret-min-32-chars-long}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh-secret-min-32-chars-long}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      OTP_DEV_MODE: ${OTP_DEV_MODE:-true}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@yesdhobi.com}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin@12345}
+    ports:
+      - "4000:4000"
+    volumes:
+      - yesdhobi_uploads:/app/uploads
+    command: sh -c "npx prisma migrate deploy && node dist/server.js"
+
+volumes:
+  yesdhobi_pgdata:
+  yesdhobi_uploads:

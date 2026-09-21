@@ -264,6 +264,8 @@ Run the API with `CORS_ORIGINS=*` and `PUBLIC_BASE_URL=http://<LAN-IP>:4000` (so
 
 ## 6. Deployment — AWS (ap-south-1, Mumbai)
 
+> **New to AWS? Use [DEPLOY.md](DEPLOY.md)** — a click-by-click guide that assumes no AWS or terminal experience. This section is the short technical version.
+
 Everything runs in the Yes Dhobi AWS account (**437045580471**, VASTRA SOLUTIONS PRIVATE LIMITED). All resources are defined as CloudFormation in `infra/` so the setup is reproducible and reviewable.
 
 > Why Mumbai: the account's home region shows *Asia Pacific (Sydney) ap-southeast-2*, which is Australia — that is only the account setting, not where services must run. `ap-south-1` keeps latency low for Indian users and data inside India.

@@ -9,7 +9,7 @@ import { logger } from '../lib/logger.js';
 /**
  * File storage abstraction.
  *  - default: local disk under UPLOAD_DIR, served at /uploads/...
- *  - when S3_BUCKET is set: any S3-compatible store (AWS S3, Supabase Storage, MinIO, R2)
+ *  - when S3_BUCKET is set: AWS S3 (or any S3-compatible endpoint via S3_ENDPOINT)
  */
 
 export interface StoredFile {

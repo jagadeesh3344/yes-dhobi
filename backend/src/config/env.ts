@@ -34,7 +34,7 @@ const schema = z.object({
   UPLOAD_DIR: z.string().default('uploads'),
   MAX_UPLOAD_MB: z.coerce.number().default(8),
 
-  // Optional S3-compatible object storage (AWS S3, Supabase Storage, MinIO ...)
+  // Optional S3 object storage (AWS S3; any S3-compatible endpoint also works)
   S3_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().optional(),
   S3_BUCKET: z.string().optional(),

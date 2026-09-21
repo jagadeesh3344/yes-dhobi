@@ -1,0 +1,509 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Yes Dhobi backend on AWS: VPC, RDS PostgreSQL, S3 uploads bucket, ECR + CodeBuild
+  (builds the API image from GitHub, no local Docker needed), ECS Fargate service behind
+  an Application Load Balancer, secrets in Secrets Manager, logs in CloudWatch.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: yesdhobi
+  GitHubRepoUrl:
+    Type: String
+    Default: https://github.com/jagadeesh3344/yes-dhobi
+    Description: Public repo containing backend/ (CodeBuild clones it to build the image)
+  GitHubBranch:
+    Type: String
+    Default: main
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: db.t4g.micro is free-tier eligible for 12 months; db.t4g.small for production traffic
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+  TaskCpu:
+    Type: String
+    Default: '512'
+  TaskMemory:
+    Type: String
+    Default: '1024'
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: Set to 0 on the very first deploy (no image yet), then 1 after the image is built
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: Optional ACM certificate ARN (same region) to serve HTTPS, e.g. for api.yesdhobi.com
+  PublicBaseUrl:
+    Type: String
+    Default: ''
+    Description: Public URL of the API (https://api.yesdhobi.com). Leave empty to use the load balancer DNS.
+  CorsOrigins:
+    Type: String
+    Default: '*'
+    Description: Comma-separated browser origins allowed to call the API
+  OtpDevMode:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  SmsProvider:
+    Type: String
+    Default: console
+    AllowedValues: [console, sns, msg91, twilio]
+  SmsSenderId:
+    Type: String
+    Default: YESDHB
+  MailProvider:
+    Type: String
+    Default: console
+    AllowedValues: [console, ses]
+  MailFrom:
+    Type: String
+    Default: Yes Dhobi <no-reply@yesdhobi.com>
+  SeedOnBoot:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Seed reference data + admin user on container start (idempotent)
+  SeedAdminEmail:
+    Type: String
+    Default: admin@yesdhobi.com
+  SeedAdminPassword:
+    Type: String
+    NoEcho: true
+    Default: Admin@12345
+    Description: Change immediately after first login
+  GoogleClientId:
+    Type: String
+    Default: ''
+
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
+  HasPublicBaseUrl: !Not [!Equals [!Ref PublicBaseUrl, '']]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Network: public subnets for ALB + Fargate tasks (public IP, no NAT cost),
+  # private subnets for the database.
+  # ---------------------------------------------------------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{ Key: Name, Value: !Sub '${ProjectName}-vpc' }]
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: { VpcId: !Ref VPC, InternetGatewayId: !Ref InternetGateway }
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.20.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: !Sub '${ProjectName}-public-1' }]
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.20.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: !Sub '${ProjectName}-public-2' }]
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.20.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags: [{ Key: Name, Value: !Sub '${ProjectName}-private-1' }]
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.20.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags: [{ Key: Name, Value: !Sub '${ProjectName}-private-2' }]
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: { VpcId: !Ref VPC }
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties: { RouteTableId: !Ref PublicRouteTable, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref InternetGateway }
+  PublicSubnet1RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PublicSubnet1, RouteTableId: !Ref PublicRouteTable }
+  PublicSubnet2RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref PublicSubnet2, RouteTableId: !Ref PublicRouteTable }
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB - public HTTP/HTTPS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: API tasks - only from the load balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 4000, ToPort: 4000, SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup }
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL - only from API tasks
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref ServiceSecurityGroup }
+
+  # ---------------------------------------------------------------------------
+  # Secrets
+  # ---------------------------------------------------------------------------
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/db'
+      Description: RDS master credentials
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "yesdhobi"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: "\"@/\\'"
+  JwtAccessSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/jwt-access'
+      GenerateSecretString: { PasswordLength: 64, ExcludePunctuation: true }
+  JwtRefreshSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/jwt-refresh'
+      GenerateSecretString: { PasswordLength: 64, ExcludePunctuation: true }
+
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for RDS
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${ProjectName}-db'
+      Engine: postgres
+      EngineVersion: '16'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: yesdhobi
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      AutoMinorVersionUpgrade: true
+      EnablePerformanceInsights: false
+
+  # ---------------------------------------------------------------------------
+  # Uploads bucket (KYC documents, selfies, shop photos) - objects publicly readable
+  # ---------------------------------------------------------------------------
+  UploadsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-uploads-${AWS::AccountId}'
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [GET, HEAD]
+            AllowedOrigins: ['*']
+            AllowedHeaders: ['*']
+            MaxAge: 3600
+  UploadsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref UploadsBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${UploadsBucket.Arn}/*'
+
+  # ---------------------------------------------------------------------------
+  # Container image: ECR repository + CodeBuild that builds from GitHub
+  # ---------------------------------------------------------------------------
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${ProjectName}-api'
+      ImageScanningConfiguration: { ScanOnPush: true }
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}'
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-codebuild-role'
+      AssumeRolePolicyDocument:
+        Statement: [{ Effect: Allow, Principal: { Service: codebuild.amazonaws.com }, Action: sts:AssumeRole }]
+      Policies:
+        - PolicyName: build-and-deploy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:GetAuthorizationToken]
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:BatchCheckLayerAvailability, ecr:CompleteLayerUpload, ecr:InitiateLayerUpload, ecr:PutImage, ecr:UploadLayerPart, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer]
+                Resource: !GetAtt EcrRepository.Arn
+              - Effect: Allow
+                Action: [ecs:UpdateService, ecs:DescribeServices]
+                Resource: '*'
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${ProjectName}-api-build'
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Source:
+        Type: GITHUB
+        Location: !Ref GitHubRepoUrl
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $REPO_URI
+                - TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-12)
+            build:
+              commands:
+                - cd backend
+                - docker build -t $REPO_URI:latest -t $REPO_URI:$TAG .
+            post_build:
+              commands:
+                - docker push $REPO_URI:latest
+                - docker push $REPO_URI:$TAG
+                - aws ecs update-service --cluster $CLUSTER --service $SERVICE --force-new-deployment --region $AWS_DEFAULT_REGION || echo "service not running yet"
+      SourceVersion: !Ref GitHubBranch
+      Artifacts: { Type: NO_ARTIFACTS }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - { Name: REPO_URI, Value: !GetAtt EcrRepository.RepositoryUri }
+          - { Name: CLUSTER, Value: !Sub '${ProjectName}-cluster' }
+          - { Name: SERVICE, Value: !Sub '${ProjectName}-api' }
+      LogsConfig:
+        CloudWatchLogs: { Status: ENABLED, GroupName: !Sub '/aws/codebuild/${ProjectName}-api-build' }
+
+  # ---------------------------------------------------------------------------
+  # ECS Fargate service + ALB
+  # ---------------------------------------------------------------------------
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${ProjectName}-api'
+      RetentionInDays: 30
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-task-execution-role'
+      AssumeRolePolicyDocument:
+        Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy]
+      Policies:
+        - PolicyName: read-secrets
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: [!Ref DBSecret, !Ref JwtAccessSecret, !Ref JwtRefreshSecret]
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-task-role'
+      AssumeRolePolicyDocument:
+        Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
+      Policies:
+        - PolicyName: app-permissions
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Resource: !Sub '${UploadsBucket.Arn}/*'
+              - Effect: Allow
+                Action: [ses:SendEmail, ses:SendRawEmail, sns:Publish]
+                Resource: '*'
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${ProjectName}-cluster'
+      ClusterSettings: [{ Name: containerInsights, Value: disabled }]
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${ProjectName}-api'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub '${EcrRepository.RepositoryUri}:latest'
+          Essential: true
+          PortMappings: [{ ContainerPort: 4000, Protocol: tcp }]
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: { awslogs-group: !Ref LogGroup, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: api }
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+            - { Name: PORT, Value: '4000' }
+            - { Name: AWS_REGION, Value: !Ref 'AWS::Region' }
+            - { Name: DB_HOST, Value: !GetAtt Database.Endpoint.Address }
+            - { Name: DB_PORT, Value: !GetAtt Database.Endpoint.Port }
+            - { Name: DB_NAME, Value: yesdhobi }
+            - { Name: DB_USER, Value: yesdhobi }
+            - { Name: CORS_ORIGINS, Value: !Ref CorsOrigins }
+            - { Name: PUBLIC_BASE_URL, Value: !If [HasPublicBaseUrl, !Ref PublicBaseUrl, !Sub 'http://${LoadBalancer.DNSName}'] }
+            - { Name: OTP_DEV_MODE, Value: !Ref OtpDevMode }
+            - { Name: SMS_PROVIDER, Value: !Ref SmsProvider }
+            - { Name: SMS_SENDER_ID, Value: !Ref SmsSenderId }
+            - { Name: MAIL_PROVIDER, Value: !Ref MailProvider }
+            - { Name: MAIL_FROM, Value: !Ref MailFrom }
+            - { Name: S3_BUCKET, Value: !Ref UploadsBucket }
+            - { Name: S3_REGION, Value: !Ref 'AWS::Region' }
+            - { Name: S3_PUBLIC_URL, Value: !Sub 'https://${UploadsBucket}.s3.${AWS::Region}.amazonaws.com' }
+            - { Name: SEED_ON_BOOT, Value: !Ref SeedOnBoot }
+            - { Name: SEED_ADMIN_EMAIL, Value: !Ref SeedAdminEmail }
+            - { Name: SEED_ADMIN_PASSWORD, Value: !Ref SeedAdminPassword }
+            - { Name: GOOGLE_CLIENT_ID, Value: !Ref GoogleClientId }
+          Secrets:
+            - { Name: DB_PASSWORD, ValueFrom: !Sub '${DBSecret}:password::' }
+            - { Name: JWT_ACCESS_SECRET, ValueFrom: !Ref JwtAccessSecret }
+            - { Name: JWT_REFRESH_SECRET, ValueFrom: !Ref JwtRefreshSecret }
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      Name: !Sub '${ProjectName}-alb'
+      Scheme: internet-facing
+      Type: application
+      Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+      SecurityGroups: [!Ref LoadBalancerSecurityGroup]
+      LoadBalancerAttributes: [{ Key: idle_timeout.timeout_seconds, Value: '120' }]
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${ProjectName}-api-tg'
+      VpcId: !Ref VPC
+      Port: 4000
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: '15' }
+        - { Key: stickiness.enabled, Value: 'true' } # Socket.IO long-polling fallback
+        - { Key: stickiness.type, Value: lb_cookie }
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - !If
+          - HasCertificate
+          - { Type: redirect, RedirectConfig: { Protocol: HTTPS, Port: '443', StatusCode: HTTP_301 } }
+          - { Type: forward, TargetGroupArn: !Ref TargetGroup }
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates: [{ CertificateArn: !Ref CertificateArn }]
+      DefaultActions: [{ Type: forward, TargetGroupArn: !Ref TargetGroup }]
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: HttpListener
+    Properties:
+      ServiceName: !Sub '${ProjectName}-api'
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref TaskDefinition
+      HealthCheckGracePeriodSeconds: 120
+      DeploymentConfiguration: { MinimumHealthyPercent: 100, MaximumPercent: 200 }
+      EnableExecuteCommand: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+          SecurityGroups: [!Ref ServiceSecurityGroup]
+      LoadBalancers:
+        - { ContainerName: api, ContainerPort: 4000, TargetGroupArn: !Ref TargetGroup }
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API
+    Value: !If [HasPublicBaseUrl, !Ref PublicBaseUrl, !Sub 'http://${LoadBalancer.DNSName}']
+  LoadBalancerDNS:
+    Value: !GetAtt LoadBalancer.DNSName
+  EcrRepositoryUri:
+    Value: !GetAtt EcrRepository.RepositoryUri
+  CodeBuildProject:
+    Value: !Ref CodeBuildProject
+  ClusterName:
+    Value: !Ref Cluster
+  ServiceName:
+    Value: !GetAtt Service.Name
+  TaskDefinitionArn:
+    Value: !Ref TaskDefinition
+  UploadsBucket:
+    Value: !Ref UploadsBucket
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  PublicSubnets:
+    Value: !Join [',', [!Ref PublicSubnet1, !Ref PublicSubnet2]]
+  ServiceSecurityGroupId:
+    Value: !Ref ServiceSecurityGroup

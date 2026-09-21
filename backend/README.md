@@ -9,7 +9,7 @@ One API + realtime server for all four Yes Dhobi frontends. Lives in `backend/` 
 | 3 | Vendor web registration (React) | `jagadeesh3344/yes-dhobi` (repo root) | works **without code changes** (same URL + payload) → §3.4 |
 | 4 | Admin panel (React) | `jagadeesh3344/Yes-dhobi-admin-panel` | every page & modal covered, responses match `types.ts` → §3.5 |
 
-**Stack:** Node 22 · TypeScript · Express · Prisma · PostgreSQL · Socket.IO · Zod · JWT.
+**Stack:** Node 22 · TypeScript · Express · Prisma · PostgreSQL · Socket.IO · Zod · JWT. **Hosting:** AWS (ap-south-1) — RDS, ECS Fargate, S3, CloudFront; see §6.
 **Tests:** 28 integration tests (`npm test`) walk the full order lifecycle across all roles plus every frontend payload shape.
 
 ---
@@ -57,22 +57,15 @@ Scripts: `npm run dev` · `npm test` · `npm run typecheck` · `npm run build &&
 
 ## 2. PostgreSQL — the options
 
-The API only needs a `DATABASE_URL`. All of these work unchanged.
+The API only needs a `DATABASE_URL` (or, on AWS, `DB_HOST/DB_NAME/DB_USER` + `DB_PASSWORD` which the container assembles into one).
 
-| Option | When | `DATABASE_URL` |
+| Option | When | Connection |
 | --- | --- | --- |
-| **Embedded (no Docker)** `npm run db:local` | local dev on this laptop (Docker Desktop crashed on this machine) | `postgresql://yesdhobi:yesdhobi@localhost:5432/yesdhobi?schema=public` (already in `.env.example`) |
+| **Embedded (no Docker)** `npm run db:local` | local dev on a laptop | `postgresql://yesdhobi:yesdhobi@localhost:5432/yesdhobi?schema=public` (already in `.env.example`) |
 | **Docker** `docker compose up -d db` | local dev / CI | same as above |
-| **Supabase** (recommended for staging + production) | hosted, free tier, backups, SQL editor | API: `postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true`  ·  migrations: same host on port `5432` **without** `pgbouncer=true` |
-| **AWS RDS** | when you need VPC/IAM isolation or big scale | `postgresql://<user>:<pw>@<rds-endpoint>:5432/yesdhobi?schema=public` |
-| **Render / Railway / Neon Postgres** | any managed Postgres | their connection string |
+| **AWS RDS PostgreSQL 16** (production) | created by `infra/backend.yaml` in ap-south-1, private subnets, encrypted, 7-day backups | password lives in Secrets Manager (`yesdhobi/db`) and is injected into the ECS task — never in a file |
 
-Supabase specifics:
-1. Create a project → *Project Settings → Database* → copy the **Transaction pooler** URI (port 6543) into `DATABASE_URL` on the API host, and the **Direct** URI (port 5432) into `DIRECT_URL`-style usage when running `npx prisma migrate deploy` (just export `DATABASE_URL` to the direct URI for that one command).
-2. Run `npx prisma migrate deploy` then `npm run db:seed` once.
-3. Optional file storage: *Storage → create bucket `uploads` (public)* → *Settings → S3 access keys* → set `S3_ENDPOINT=https://<ref>.supabase.co/storage/v1/s3`, `S3_REGION=<region>`, `S3_BUCKET=uploads`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL=https://<ref>.supabase.co/storage/v1/object/public/uploads`. Without `S3_*` files are stored on the server disk under `./uploads`.
-
-Encoding note: the database must be UTF-8 (₹ symbols). Managed providers are; the embedded script forces it.
+The database must be UTF-8 (₹ symbols). RDS and the embedded script both are.
 
 ---
 
@@ -152,11 +145,11 @@ Files/photos: send a base64 data URL in the field, or upload first with `POST /u
 | `vendor_profile_screen` Edit shop, Logout | `GET /vendors/me`, `PATCH /vendors/me`, `POST /auth/logout` |
 
 ### 3.4 Vendor web registration (`yes-dhobi`)
-Already calls `POST https://yesdhobi-api.onrender.com/api/v1/vendors` (with a `/api/v1/vendors` Vite-proxy fallback). This API implements that route with the exact payload from `src/utils/vendorApi.ts` (numeric `serviceId` 1‑9, `equipmentId` 1‑9, `serviceAreas` zone ids 1‑10, weekday numbers, base64 document URLs) and returns `{ registrationId, vendorId, status }` which `Step5DocumentsVerification.tsx` reads.
+Calls `POST ${VITE_API_URL}/vendors` (with a `/api/v1/vendors` Vite-proxy fallback for local dev). This API implements that route with the exact payload from `src/utils/vendorApi.ts` (numeric `serviceId` 1‑9, `equipmentId` 1‑9, `serviceAreas` zone ids 1‑10, weekday numbers, base64 document URLs) and returns `{ registrationId, vendorId, status }` which `Step5DocumentsVerification.tsx` reads.
 
 **Where to set the URL**
-* Local test: `src/utils/vendorApi.ts` line 3 → `export const PRIMARY_API_ENDPOINT = 'http://localhost:4000/api/v1/vendors';` **or** `vite.config.ts` → `proxy['/api/v1/vendors'].target = 'http://localhost:4000'`.
-* Production: deploy this backend to Render as `yesdhobi-api` (Dockerfile provided) and nothing in the web repo needs to change.
+* Local test: nothing to change — `VITE_API_URL` defaults to `http://localhost:4000/api/v1` (`.env.example`).
+* Production: the website build reads `VITE_API_URL` (set by `infra/deploy-frontends.sh` to the deployed API).
 
 After submitting, the vendor gets an SMS (console in dev) with a temporary password for the partner app; the shop appears in the admin **Verifications** queue and becomes `ACTIVE` on approval.
 
@@ -269,30 +262,72 @@ Run the API with `CORS_ORIGINS=*` and `PUBLIC_BASE_URL=http://<LAN-IP>:4000` (so
 
 ---
 
-## 6. Deployment
+## 6. Deployment — AWS (ap-south-1, Mumbai)
 
-### 6.1 Recommendation: Supabase (database + storage) + Render (API)
-1. Supabase project → copy pooler URI (§2).
-2. Render → *New Web Service* → this repo, Docker runtime, name it `yesdhobi-api` (the web app already points to `yesdhobi-api.onrender.com`).
-3. Environment variables (Render → Environment):
-   ```
-   NODE_ENV=production
-   DATABASE_URL=<supabase pooler uri>
-   JWT_ACCESS_SECRET=<32+ random chars>   JWT_REFRESH_SECRET=<32+ random chars>
-   OTP_DEV_MODE=false      SMS_PROVIDER=msg91 (after implementing it in src/services/sms.ts)
-   CORS_ORIGINS=https://yesdhobi.com,https://admin.yesdhobi.com
-   PUBLIC_BASE_URL=https://yesdhobi-api.onrender.com
-   S3_*                     (optional, Supabase Storage — §2)
-   SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD
-   ```
-4. Once: `npx prisma migrate deploy` with the **direct** DB URI, then `npm run db:seed` (or use the Render shell).
-5. Deploy the admin panel & vendor site to Vercel/Netlify with `VITE_API_URL` pointing at the API.
+Everything runs in the Yes Dhobi AWS account (**437045580471**, VASTRA SOLUTIONS PRIVATE LIMITED). All resources are defined as CloudFormation in `infra/` so the setup is reproducible and reviewable.
 
-### 6.2 AWS instead
-RDS Postgres (`DATABASE_URL`), S3 (`S3_REGION`, `S3_BUCKET`, IAM keys; no `S3_ENDPOINT`), container on App Runner/ECS from the `Dockerfile`. Same code. Choose it when you need VPC isolation/IAM, or beyond ~10k orders/day; otherwise it costs more (RDS + Fargate ≳ $50/mo) and takes more setup than Supabase. Migration later = `pg_dump` + bucket sync.
+> Why Mumbai: the account's home region shows *Asia Pacific (Sydney) ap-southeast-2*, which is Australia — that is only the account setting, not where services must run. `ap-south-1` keeps latency low for Indian users and data inside India.
 
-### 6.3 Docker (self-host)
-`docker compose up --build` → Postgres + API on :4000 (runs `prisma migrate deploy` on boot; seed once with `docker compose exec api npx tsx prisma/seed.ts`).
+### 6.1 What gets created
+
+| Stack | Resources | Approx. monthly cost |
+| --- | --- | --- |
+| `yesdhobi-backend` (`infra/backend.yaml`) | VPC (2 public + 2 private subnets, no NAT), **RDS PostgreSQL 16** `db.t4g.micro` (free tier 12 months), **S3** uploads bucket, **ECR** repo, **CodeBuild** (builds the Docker image from GitHub — no Docker needed on your laptop), **ECS Fargate** service (0.5 vCPU / 1 GB) behind an **Application Load Balancer**, Secrets Manager (DB password, JWT secrets), CloudWatch logs | ALB ≈ $18, Fargate ≈ $15, RDS ≈ $13 (free first year), rest < $2 |
+| `yesdhobi-frontends` (`infra/frontends.yaml`) | Two private **S3** buckets + **CloudFront** distributions (HTTPS, SPA routing) for the admin panel and the website | < $1 at low traffic |
+
+Realtime (Socket.IO) works through the ALB (WebSockets + sticky sessions enabled). Migrations run automatically on every container start; the seed runs too while `SeedOnBoot=true`.
+
+### 6.2 One-time: credentials for the CLI
+
+The person deploying needs an IAM user in the Yes Dhobi account. In the AWS console: **IAM → Users → Create user** (name `deployer`, no console access) → *Attach policies directly* → `AdministratorAccess` → Create → open the user → **Security credentials → Create access key → CLI**. Then on the machine that will deploy:
+
+```bash
+aws configure --profile yesdhobi      # paste the key id + secret, region ap-south-1, output json
+aws sts get-caller-identity --profile yesdhobi   # must print Account 437045580471
+```
+
+### 6.3 Deploy the backend
+
+```bash
+cd backend
+AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
+```
+
+First run takes ~15 minutes (RDS). The script: creates the stack with the service scaled to 0 → runs CodeBuild to build and push the image from GitHub `main` → scales the service to 1 → waits until `/health` responds → prints the API URL (`http://<alb-dns>`).
+
+Options via `PARAMS`, e.g. once you have a domain and an ACM certificate **in ap-south-1**:
+
+```bash
+PARAMS="CertificateArn=arn:aws:acm:ap-south-1:437045580471:certificate/... PublicBaseUrl=https://api.yesdhobi.com CorsOrigins=https://admin.yesdhobi.com,https://yesdhobi.com SmsProvider=sns MailProvider=ses OtpDevMode=false SeedOnBoot=false" \
+AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
+```
+Then point `api.yesdhobi.com` (CNAME) at the ALB DNS from the stack outputs.
+
+### 6.4 Deploy the frontends
+
+```bash
+AWS_PROFILE=yesdhobi bash infra/deploy-frontends.sh
+```
+Builds the admin panel (`../Yes-dhobi-admin-panel`, with `VITE_API_URL` set from the backend stack) and this website, uploads to S3 and invalidates CloudFront. Prints the two HTTPS URLs. For custom domains pass `PARAMS="AdminDomainName=admin.yesdhobi.com WebDomainName=yesdhobi.com CertificateArn=<us-east-1 cert>"` (CloudFront needs its certificate in us-east-1) and CNAME the domains to the CloudFront hostnames.
+
+After the frontends are up, re-run the backend deploy with `CorsOrigins=` set to those URLs.
+
+### 6.5 Redeploying after code changes
+
+* Backend: `AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh` again (or just `aws codebuild start-build --project-name yesdhobi-api-build`). `infra/github-workflows/deploy-aws.yml` does this automatically on every push once moved to `.github/workflows/` with the two AWS secrets added to the repo.
+* Frontends: `bash infra/deploy-frontends.sh`.
+
+### 6.6 SMS and email on AWS
+
+* **SMS → Amazon SNS** (`SmsProvider=sns`): for Indian numbers register a DLT Entity/Template with your operator and request an SNS sender id (`SmsSenderId`); until then SNS may deliver only internationally. MSG91 remains available as an alternative.
+* **Email → Amazon SES** (`MailProvider=ses`): verify the `MailFrom` address/domain in SES (ap-south-1) and request production access to send to unverified addresses.
+
+### 6.7 Operations
+
+* Logs: CloudWatch → `/ecs/yesdhobi-api`. Shell into the container: `aws ecs execute-command --cluster yesdhobi-cluster --task <id> --container api --interactive --command sh`.
+* Database: private; connect from a task shell (`npx prisma studio` is not exposed) or add a bastion if needed. Backups: automated daily, 7 days.
+* Scaling: raise `DesiredCount`/`TaskCpu`/`TaskMemory`/`DBInstanceClass` parameters and redeploy.
+* Tear down: `aws cloudformation delete-stack --stack-name yesdhobi-frontends` then `yesdhobi-backend` (RDS leaves a final snapshot).
 
 ---
 
@@ -318,14 +353,14 @@ Client → server: `order:subscribe <orderId>`, `order:unsubscribe`, `zone:subsc
 ## 8. Next steps (in priority order)
 
 1. **Wire the frontends** (§3) – start with the vendor site (one-line URL change), then the admin panel `DataContext.tsx`, then the Flutter apps.
-2. **SMS provider** – implement MSG91/Twilio in `src/services/sms.ts`; set `OTP_DEV_MODE=false`.
+2. **SMS** – switch to `SmsProvider=sns` after DLT registration (or implement MSG91 in `src/services/sms.ts`); set `OtpDevMode=false`.
 3. **Payment gateway** – Razorpay/PhonePe in `src/modules/payments/payments.routes.ts` (create provider order in `intent`, verify signature in `confirm`, handle `webhook`).
 4. **Push notifications** – FCM send in `src/services/notifications.ts` using stored `DeviceToken`s (socket delivery already works).
-5. **Email** – Resend/SES in `src/services/mailer.ts` (admin resets, vendor approvals, invoices).
+5. **Email** – `MailProvider=ses` after verifying the sender in SES.
 6. **Google sign-in** – set `GOOGLE_CLIENT_ID`.
 7. **PDF invoices** – `GET /orders/:id/invoice` returns JSON today; add `pdfkit` if a file download is required.
 8. **Maps** – add a distance/ETA provider (Google Distance Matrix) in `orders.service.ts` where `distanceKm` is computed by Haversine.
-9. **Ops** – add Sentry/Logtail, uptime check on `/health`, nightly `pg_dump` (Supabase does this automatically).
+9. **Ops** – add Sentry/Logtail, uptime check on `/health`, RDS automated backups are already on (7 days).
 
 ---
 
@@ -346,5 +381,6 @@ src/modules/               auth, catalog, customers, orders, riders, vendors (+ 
                            catalog, ops, dashboard)
 tests/                     lifecycle.test.ts · frontend-contracts.test.ts
 scripts/local-db.ts        embedded PostgreSQL for Docker-less development
-Dockerfile · docker-compose.yml
+infra/                     AWS CloudFormation (backend.yaml, frontends.yaml) + deploy scripts + CI workflow
+Dockerfile · docker-entrypoint.sh · docker-compose.yml (local only)
 ```

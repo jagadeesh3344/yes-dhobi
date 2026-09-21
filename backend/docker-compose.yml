@@ -34,11 +34,11 @@ services:
       OTP_DEV_MODE: ${OTP_DEV_MODE:-true}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@yesdhobi.com}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin@12345}
+      SEED_ON_BOOT: "true"
     ports:
       - "4000:4000"
     volumes:
       - yesdhobi_uploads:/app/uploads
-    command: sh -c "npx prisma migrate deploy && node dist/server.js"
 
 volumes:
   yesdhobi_pgdata:

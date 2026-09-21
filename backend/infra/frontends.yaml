@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Yes Dhobi static frontends on AWS: private S3 buckets served through CloudFront
+  (SPA routing, HTTPS) for the admin panel and the vendor website.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: yesdhobi
+  AdminDomainName:
+    Type: String
+    Default: ''
+    Description: Optional custom domain for the admin panel (e.g. admin.yesdhobi.com); needs CertificateArn
+  WebDomainName:
+    Type: String
+    Default: ''
+    Description: Optional custom domain for the website (e.g. yesdhobi.com / www.yesdhobi.com)
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: ACM certificate in us-east-1 covering the domains above (CloudFront requirement)
+
+Conditions:
+  HasAdminDomain: !And [!Not [!Equals [!Ref AdminDomainName, '']], !Not [!Equals [!Ref CertificateArn, '']]]
+  HasWebDomain: !And [!Not [!Equals [!Ref WebDomainName, '']], !Not [!Equals [!Ref CertificateArn, '']]]
+
+Resources:
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ProjectName}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ---- Admin panel -----------------------------------------------------------
+  AdminBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-admin-${AWS::AccountId}'
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+  AdminDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Yes Dhobi admin panel
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_200
+        HttpVersion: http2and3
+        Aliases: !If [HasAdminDomain, [!Ref AdminDomainName], !Ref 'AWS::NoValue']
+        ViewerCertificate: !If
+          - HasAdminDomain
+          - { AcmCertificateArn: !Ref CertificateArn, SslSupportMethod: sni-only, MinimumProtocolVersion: TLSv1.2_2021 }
+          - { CloudFrontDefaultCertificate: true }
+        Origins:
+          - Id: admin-s3
+            DomainName: !GetAtt AdminBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig: { OriginAccessIdentity: '' }
+        DefaultCacheBehavior:
+          TargetOriginId: admin-s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # CachingOptimized
+        CustomErrorResponses:
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 0 }
+  AdminBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AdminBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${AdminBucket.Arn}/*'
+            Condition: { StringEquals: { 'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${AdminDistribution}' } }
+
+  # ---- Vendor website --------------------------------------------------------
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-web-${AWS::AccountId}'
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Yes Dhobi website + vendor registration
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_200
+        HttpVersion: http2and3
+        Aliases: !If [HasWebDomain, [!Ref WebDomainName], !Ref 'AWS::NoValue']
+        ViewerCertificate: !If
+          - HasWebDomain
+          - { AcmCertificateArn: !Ref CertificateArn, SslSupportMethod: sni-only, MinimumProtocolVersion: TLSv1.2_2021 }
+          - { CloudFrontDefaultCertificate: true }
+        Origins:
+          - Id: web-s3
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig: { OriginAccessIdentity: '' }
+        DefaultCacheBehavior:
+          TargetOriginId: web-s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CustomErrorResponses:
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html, ErrorCachingMinTTL: 0 }
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub '${WebBucket.Arn}/*'
+            Condition: { StringEquals: { 'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}' } }
+
+Outputs:
+  AdminBucket:
+    Value: !Ref AdminBucket
+  AdminDistributionId:
+    Value: !Ref AdminDistribution
+  AdminUrl:
+    Value: !If [HasAdminDomain, !Sub 'https://${AdminDomainName}', !Sub 'https://${AdminDistribution.DomainName}']
+  WebBucket:
+    Value: !Ref WebBucket
+  WebDistributionId:
+    Value: !Ref WebDistribution
+  WebUrl:
+    Value: !If [HasWebDomain, !Sub 'https://${WebDomainName}', !Sub 'https://${WebDistribution.DomainName}']

@@ -1,6 +1,9 @@
 import { RegistrationFormData, ServiceItem } from '../types';
 
-export const PRIMARY_API_ENDPOINT = 'https://yesdhobi-api.onrender.com/api/v1/vendors';
+// Base URL of the Yes Dhobi API (see backend/README.md). Set VITE_API_URL at build time,
+// e.g. VITE_API_URL=https://api.yesdhobi.com/api/v1
+const API_BASE = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000/api/v1').replace(/\/$/, '');
+export const PRIMARY_API_ENDPOINT = `${API_BASE}/vendors`;
 export const PROXY_API_ENDPOINT = '/api/v1/vendors';
 
 const SERVICE_ID_MAP: Record<string, number> = {

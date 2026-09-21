@@ -20,7 +20,13 @@ const schema = z.object({
     .default('false')
     .transform((v) => v === 'true' || v === '1'),
   OTP_TTL_SECONDS: z.coerce.number().default(300),
-  SMS_PROVIDER: z.enum(['console', 'msg91', 'twilio']).default('console'),
+  // console | sns (AWS SNS) | msg91 | twilio
+  SMS_PROVIDER: z.enum(['console', 'sns', 'msg91', 'twilio']).default('console'),
+  SMS_SENDER_ID: z.string().default('YESDHB'),
+  // console | ses (AWS SES)
+  MAIL_PROVIDER: z.enum(['console', 'ses']).default('console'),
+  MAIL_FROM: z.string().default('Yes Dhobi <no-reply@yesdhobi.com>'),
+  AWS_REGION: z.string().optional(),
 
   PICKUP_REQUEST_TTL_SECONDS: z.coerce.number().default(45),
   DISPATCH_RADIUS_KM: z.coerce.number().default(8),

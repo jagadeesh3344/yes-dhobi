@@ -1,0 +1,38 @@
+# Continuous deployment to AWS on every push to main.
+# Move this file to .github/workflows/deploy-aws.yml in the repo root once a token
+# with the `workflow` scope is available (gh auth refresh -s workflow).
+#
+# Required repository secrets:
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY  - the `deployer` IAM user of the Yes Dhobi account
+name: Deploy to AWS
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**']
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ap-south-1
+      STACK: yesdhobi-backend
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Build image on CodeBuild and roll the ECS service
+        run: |
+          PROJECT=$(aws cloudformation describe-stacks --stack-name $STACK --query "Stacks[0].Outputs[?OutputKey=='CodeBuildProject'].OutputValue" --output text)
+          ID=$(aws codebuild start-build --project-name "$PROJECT" --source-version "$GITHUB_SHA" --query 'build.id' --output text)
+          while :; do
+            S=$(aws codebuild batch-get-builds --ids "$ID" --query 'builds[0].buildStatus' --output text)
+            [ "$S" = IN_PROGRESS ] && { sleep 15; continue; }
+            [ "$S" = SUCCEEDED ] && break
+            echo "build $S"; exit 1
+          done
+          CLUSTER=$(aws cloudformation describe-stacks --stack-name $STACK --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue" --output text)
+          SERVICE=$(aws cloudformation describe-stacks --stack-name $STACK --query "Stacks[0].Outputs[?OutputKey=='ServiceName'].OutputValue" --output text)
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"

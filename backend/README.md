@@ -264,6 +264,8 @@ Run the API with `CORS_ORIGINS=*` and `PUBLIC_BASE_URL=http://<LAN-IP>:4000` (so
 
 ## 6. Deployment — AWS (ap-south-1, Mumbai)
 
+> **Guides:** [DEPLOY.md](DEPLOY.md) (click-by-click AWS deployment) · [TESTING.md](TESTING.md) (how to test everything, Postman collection in `postman/`)
+>
 > **New to AWS? Use [DEPLOY.md](DEPLOY.md)** — a click-by-click guide that assumes no AWS or terminal experience. This section is the short technical version.
 
 Everything runs in the Yes Dhobi AWS account (**437045580471**, VASTRA SOLUTIONS PRIVATE LIMITED). All resources are defined as CloudFormation in `infra/` so the setup is reproducible and reviewable.

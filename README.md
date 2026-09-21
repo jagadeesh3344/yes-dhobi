@@ -99,4 +99,4 @@ npm run lint
 
 ## Backend & deployment
 
-The API for all Yes Dhobi apps lives in [`backend/`](backend/README.md). To put everything live on AWS, follow the step-by-step guide in [`backend/DEPLOY.md`](backend/DEPLOY.md) (no AWS experience needed).
+The API for all Yes Dhobi apps lives in [`backend/`](backend/README.md). To put everything live on AWS, follow the step-by-step guide in [`backend/DEPLOY.md`](backend/DEPLOY.md) (no AWS experience needed), then test it with [`backend/TESTING.md`](backend/TESTING.md).

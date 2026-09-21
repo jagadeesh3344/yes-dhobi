@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "da11520e-b1a5-4b02-976b-4e61349f7393",
+    "_postman_id": "cdee8fbc-7f52-4212-92b6-e1959af574fa",
     "name": "Yes Dhobi API",
     "description": "Manual test collection for the Yes Dhobi backend. Set baseUrl (…/api/v1) and apiOrigin, then run folders in order: Public -> Customer -> Vendor -> Rider (see TESTING.md).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -307,9 +307,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "const b = pm.response.json();",
-                  "if (b.accessToken) { pm.collectionVariables.set(\"customerToken\", b.accessToken); pm.collectionVariables.set(\"customerRefresh\", b.refreshToken); }",
-                  "pm.test(\"status \" + pm.response.code, () => pm.expect(pm.response.code).to.be.below(300));"
+                  "pm.test(\"new user must give a name (400) / existing user logs in (200)\", () => pm.expect([200, 400]).to.include(pm.response.code)); const b = pm.response.json(); if (b.accessToken) { pm.collectionVariables.set(\"customerToken\", b.accessToken); pm.collectionVariables.set(\"customerRefresh\", b.refreshToken); }"
                 ]
               }
             }

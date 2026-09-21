@@ -55,12 +55,15 @@ authRouter.post(
       req.body,
     );
     const phone = normalizePhone(body.phone);
+    let user = await prisma.user.findUnique({ where: { phone_role: { phone, role: 'CUSTOMER' } }, include: { customer: true } });
+    // ask for the name *before* consuming the OTP so the app can prompt and resubmit the same code
+    const name = body.name;
+    if (!user && !name) throw badRequest('Name is required to create your account', { field: 'name', isNewUser: true });
     await verifyOtp(phone, body.otp, 'LOGIN');
 
-    let user = await prisma.user.findUnique({ where: { phone_role: { phone, role: 'CUSTOMER' } }, include: { customer: true } });
     let isNewUser = false;
     if (!user) {
-      if (!body.name) throw badRequest('Name is required to create your account', { field: 'name' });
+      if (!name) throw badRequest('Name is required to create your account', { field: 'name' });
       isNewUser = true;
       const referrer = body.referralCode
         ? await prisma.customer.findUnique({ where: { referralCode: body.referralCode.toUpperCase() } })
@@ -69,9 +72,9 @@ authRouter.post(
         data: {
           role: 'CUSTOMER',
           phone,
-          name: body.name,
+          name,
           email: body.email,
-          customer: { create: { referralCode: referralCode(body.name), referredById: referrer?.id } },
+          customer: { create: { referralCode: referralCode(name), referredById: referrer?.id } },
         },
         include: { customer: true },
       });
@@ -86,7 +89,7 @@ authRouter.post(
               type: 'REFERRAL_BONUS',
               amount: bonus,
               balanceAfter: updated.walletBalance,
-              description: `Referral bonus for inviting ${body.name}`,
+              description: `Referral bonus for inviting ${name}`,
             },
           });
         }

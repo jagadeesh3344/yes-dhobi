@@ -23,6 +23,14 @@ const schema = z.object({
   // console | sns (AWS SNS) | msg91 | twilio
   SMS_PROVIDER: z.enum(['console', 'sns', 'msg91', 'twilio']).default('console'),
   SMS_SENDER_ID: z.string().default('YESDHB'),
+  // India (TRAI DLT): entity id registered with the operator, and a template id per message type
+  SMS_DLT_ENTITY_ID: z.string().optional(),
+  SMS_OTP_TEMPLATE_ID: z.string().optional(),
+  MSG91_AUTH_KEY: z.string().optional(),
+  MSG91_OTP_TEMPLATE_ID: z.string().optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM: z.string().optional(),
   // console | ses (AWS SES)
   MAIL_PROVIDER: z.enum(['console', 'ses']).default('console'),
   MAIL_FROM: z.string().default('Yes Dhobi <no-reply@yesdhobi.com>'),

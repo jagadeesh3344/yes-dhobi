@@ -233,13 +233,31 @@ AWS console → search **CloudFormation** → select `yesdhobi-frontends` → **
 Do these after the test above works. Each is one AWS setting plus one redeploy.
 
 ### 11.1 Real SMS for OTPs (right now the OTP is always 1234)
-1. Register your business for **DLT** with your telecom operator (Jio/Airtel/Vi TRAI requirement) and get a **Sender ID** (6 letters, e.g. `YESDHB`) and an approved OTP template.
-2. AWS console → search **SNS** → left menu **Text messaging (SMS)** → **Sandbox** → request production access (a short form) and, under *Sender ID / India*, register your DLT details.
-3. Redeploy with real SMS switched on:
 
+**How the OTP works today:** when someone taps "Send OTP", the API generates a 4-digit code, stores only its hash (never the code itself), sets a 5-minute expiry, and hands the message to the configured SMS provider. Verification checks the hash, allows 5 wrong attempts, then burns the code. Requesting more than 3 codes in 10 minutes for the same number is blocked. While `OtpDevMode=true` the code is always `1234` and is also returned in the API response so you can test without SMS.
+
+To send real SMS you need (a) permission from the Indian telecom regulator (DLT) and (b) an SMS provider account. Pick one provider:
+
+**Option A — AWS SNS** (stays inside the AWS account you already have)
+1. Register on your operator's **DLT portal** (Jio/Airtel/Vi): create an *Entity* (get the **Entity ID**), register a **Sender ID** (6 letters, e.g. `YESDHB`) and an **OTP template** whose text matches ours: `{#var#} is your Yes Dhobi verification code. Valid for {#var#} minutes.` → you get a **Template ID**.
+2. AWS console → **SNS** → **Text messaging (SMS)** → *Request production access* (exit the sandbox), then register your Sender ID / DLT details under **Sender IDs**.
+3. Redeploy with the values from step 1:
 ```bash
-cd ~/yesdhobi/yes-dhobi/backend && PARAMS="SmsProvider=sns SmsSenderId=YESDHB OtpDevMode=false SeedOnBoot=false" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
+cd ~/yesdhobi/yes-dhobi/backend && PARAMS="SmsProvider=sns OtpDevMode=false SeedOnBoot=false SmsSenderId=YESDHB SmsDltEntityId=<entity id> SmsOtpTemplateId=<template id>" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
 ```
+
+**Option B — MSG91** (Indian provider; DLT paperwork is handled inside their panel and is usually quicker)
+1. Sign up at msg91.com → complete DLT/sender-id registration → create a **Flow/Template** for the OTP message → note the **Auth Key** and **Template ID**.
+2. Redeploy:
+```bash
+cd ~/yesdhobi/yes-dhobi/backend && PARAMS="SmsProvider=msg91 OtpDevMode=false SeedOnBoot=false SmsSenderId=YESDHB Msg91AuthKey=<auth key> Msg91OtpTemplateId=<template id>" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
+```
+
+**Option C — Twilio** (only practical for non-Indian numbers / internal testing): `SmsProvider=twilio TwilioAccountSid=… TwilioAuthToken=… TwilioFrom=+1…`.
+
+**Check it worked:** request an OTP for your own number from the app or with
+`curl -X POST <API>/api/v1/auth/customer/request-otp -H "Content-Type: application/json" -d '{"phone":"<your number>"}'`.
+The response must **not** contain `devOtp` any more, and the SMS should arrive within seconds. If it doesn't, CloudWatch logs (`/ecs/yesdhobi-api`) show the provider's exact error — the usual causes are "sender id not registered", "template mismatch" (the text must match the approved template word for word) or "account still in sandbox".
 
 ### 11.2 Email (password resets, notifications)
 1. AWS console → search **SES** → **Identities** → **Create identity** → *Domain* `yesdhobi.com` → follow the DNS instructions it shows (add the records at your domain registrar) → wait until it says *Verified*.

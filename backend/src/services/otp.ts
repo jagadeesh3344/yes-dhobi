@@ -29,7 +29,11 @@ export async function requestOtp(phone: string, purpose: OtpPurpose) {
 
   // email-keyed codes (admin resets) are delivered by the caller through the mailer
   if (!phone.startsWith('email:')) {
-    await sms.send(phone, `${code} is your Yes Dhobi verification code. Valid for ${Math.round(env.OTP_TTL_SECONDS / 60)} minutes.`);
+    const minutes = String(Math.round(env.OTP_TTL_SECONDS / 60));
+    await sms.send(phone, `${code} is your Yes Dhobi verification code. Valid for ${minutes} minutes.`, {
+      templateId: env.SMS_OTP_TEMPLATE_ID ?? env.MSG91_OTP_TEMPLATE_ID,
+      vars: { otp: code, minutes },
+    });
   }
 
   return {

@@ -55,6 +55,31 @@ Parameters:
   SmsSenderId:
     Type: String
     Default: YESDHB
+  SmsDltEntityId:
+    Type: String
+    Default: ''
+    Description: India DLT entity id (required for real SMS to Indian numbers)
+  SmsOtpTemplateId:
+    Type: String
+    Default: ''
+    Description: DLT-approved template id for the OTP message
+  Msg91AuthKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+  Msg91OtpTemplateId:
+    Type: String
+    Default: ''
+  TwilioAccountSid:
+    Type: String
+    Default: ''
+  TwilioAuthToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+  TwilioFrom:
+    Type: String
+    Default: ''
   MailProvider:
     Type: String
     Default: console
@@ -402,6 +427,13 @@ Resources:
             - { Name: OTP_DEV_MODE, Value: !Ref OtpDevMode }
             - { Name: SMS_PROVIDER, Value: !Ref SmsProvider }
             - { Name: SMS_SENDER_ID, Value: !Ref SmsSenderId }
+            - { Name: SMS_DLT_ENTITY_ID, Value: !Ref SmsDltEntityId }
+            - { Name: SMS_OTP_TEMPLATE_ID, Value: !Ref SmsOtpTemplateId }
+            - { Name: MSG91_AUTH_KEY, Value: !Ref Msg91AuthKey }
+            - { Name: MSG91_OTP_TEMPLATE_ID, Value: !Ref Msg91OtpTemplateId }
+            - { Name: TWILIO_ACCOUNT_SID, Value: !Ref TwilioAccountSid }
+            - { Name: TWILIO_AUTH_TOKEN, Value: !Ref TwilioAuthToken }
+            - { Name: TWILIO_FROM, Value: !Ref TwilioFrom }
             - { Name: MAIL_PROVIDER, Value: !Ref MailProvider }
             - { Name: MAIL_FROM, Value: !Ref MailFrom }
             - { Name: S3_BUCKET, Value: !Ref UploadsBucket }

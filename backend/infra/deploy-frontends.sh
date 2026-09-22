@@ -8,10 +8,11 @@
 #   <root>/Yes-dhobi-admin-panel
 # Override with ADMIN_DIR / WEB_DIR. The API URL is read from the backend stack.
 set -euo pipefail
+export PATH="/c/Program Files/Amazon/AWSCLIV2:$PATH"
 cd "$(dirname "$0")"
 
 export AWS_PROFILE="${AWS_PROFILE:-yesdhobi}"
-export AWS_DEFAULT_REGION="${AWS_REGION:-ap-south-1}"
+export AWS_DEFAULT_REGION="${AWS_REGION:-ap-southeast-2}"
 STACK="${FRONTEND_STACK_NAME:-yesdhobi-frontends}"
 BACKEND_STACK="${STACK_NAME:-yesdhobi-backend}"
 PARAMS="${PARAMS:-}"   # e.g. "AdminDomainName=admin.yesdhobi.com WebDomainName=yesdhobi.com CertificateArn=arn:aws:acm:us-east-1:..."

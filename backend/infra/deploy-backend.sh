@@ -7,10 +7,11 @@
 # Requires: aws cli v2 with a profile for the Yes Dhobi account. No Docker needed
 # locally - the image is built by AWS CodeBuild straight from GitHub.
 set -euo pipefail
+export PATH="/c/Program Files/Amazon/AWSCLIV2:$PATH"
 cd "$(dirname "$0")"
 
 export AWS_PROFILE="${AWS_PROFILE:-yesdhobi}"
-export AWS_DEFAULT_REGION="${AWS_REGION:-ap-south-1}"
+export AWS_DEFAULT_REGION="${AWS_REGION:-ap-southeast-2}"
 STACK="${STACK_NAME:-yesdhobi-backend}"
 PARAMS="${PARAMS:-}"   # extra --parameter-overrides, e.g. "CertificateArn=arn:... PublicBaseUrl=https://api.yesdhobi.com CorsOrigins=https://admin.yesdhobi.com"
 

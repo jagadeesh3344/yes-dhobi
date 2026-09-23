@@ -150,33 +150,59 @@ export const initialFormData: RegistrationFormData = {
 
 export function useRegistrationStore() {
   const [currentStep, setCurrentStep] = useState<RegistrationStep>(() => {
-    const savedStep = localStorage.getItem(STEP_KEY);
-    if (savedStep) {
-      if (savedStep === 'success') return 'success';
-      const parsed = parseInt(savedStep, 10);
-      if (parsed >= 1 && parsed <= 5) return parsed as RegistrationStep;
+    try {
+      const savedStep = localStorage.getItem(STEP_KEY);
+      if (savedStep) {
+        if (savedStep === 'success') return 'success';
+        const parsed = parseInt(savedStep, 10);
+        if (parsed >= 1 && parsed <= 5) return parsed as RegistrationStep;
+      }
+    } catch (e) {
+      console.warn('Failed to read step from localStorage', e);
     }
     return 1;
   });
 
   const [formData, setFormData] = useState<RegistrationFormData>(() => {
-    const savedData = localStorage.getItem(STORAGE_KEY);
-    if (savedData) {
-      try {
+    try {
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (savedData) {
         return { ...initialFormData, ...JSON.parse(savedData) };
-      } catch (e) {
-        console.error('Failed to parse saved registration data', e);
       }
+    } catch (e) {
+      console.warn('Failed to parse saved registration data', e);
     }
     return initialFormData;
   });
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(formData));
+    try {
+      // Exclude large binary/base64 file strings from localStorage to avoid QuotaExceededError
+      const {
+        profilePhoto,
+        aadhaarFront,
+        aadhaarBack,
+        panFront,
+        shopPhoto,
+        gstCertificate,
+        tradeLicense,
+        labourLicense,
+        cancelledCheque,
+        ...persistableData
+      } = formData;
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistableData));
+    } catch (err) {
+      console.warn('Unable to persist registration form to localStorage (quota exceeded or disabled):', err);
+    }
   }, [formData]);
 
   useEffect(() => {
-    localStorage.setItem(STEP_KEY, String(currentStep));
+    try {
+      localStorage.setItem(STEP_KEY, String(currentStep));
+    } catch (err) {
+      console.warn('Unable to persist step to localStorage:', err);
+    }
   }, [currentStep]);
 
   const updateFormData = (fields: Partial<RegistrationFormData>) => {

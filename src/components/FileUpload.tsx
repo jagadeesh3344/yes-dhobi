@@ -35,6 +35,50 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       alert(`File size exceeds maximum limit of ${maxSizeMB}MB.`);
       return;
     }
+
+    // Automatically compress/resize images client-side to prevent memory bloat and API payload rejection
+    if (file.type && file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const maxDim = 1280;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL('image/jpeg', 0.8);
+            if (onChange) onChange(compressed);
+            return;
+          }
+
+          if (onChange) onChange(reader.result as string);
+        };
+        img.onerror = () => {
+          if (onChange) onChange(reader.result as string);
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    // For PDFs and other documents, read directly
     const reader = new FileReader();
     reader.onload = () => {
       if (onChange) {
@@ -53,6 +97,19 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     }
   };
 
+  const handleRemove = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    if (onChange) {
+      onChange(null);
+    }
+  };
+
+  const isImageValue =
+    typeof value === 'string' &&
+    (value.startsWith('data:image') || value.startsWith('http://') || value.startsWith('https://'));
+
   return (
     <div className="w-full">
       <input
@@ -66,8 +123,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
       {value ? (
         <div className="border border-blue-200 bg-blue-50/50 rounded-xl p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
-              {value.startsWith('data:image') ? (
+            <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center overflow-hidden shrink-0">
+              {isImageValue ? (
                 <img src={value} alt="Uploaded preview" className="w-full h-full object-cover rounded-lg" />
               ) : (
                 <FileText className="w-5 h-5" />
@@ -83,7 +140,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           </div>
           <button
             type="button"
-            onClick={() => onChange && onChange(null)}
+            onClick={handleRemove}
             className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
           >
             <X className="w-4 h-4" />

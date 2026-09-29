@@ -4,11 +4,11 @@ This guide assumes you have **never used AWS or a terminal before**. Follow it t
 
 At the end you will have:
 
-* the **API** running at an AWS address (e.g. `http://yesdhobi-alb-1234.ap-south-1.elb.amazonaws.com`)
+* the **API** running at an AWS address (e.g. `http://yesdhobi-alb-1234.ap-southeast-2.elb.amazonaws.com`)
 * the **Admin panel** at an `https://….cloudfront.net` address
 * the **Website** (vendor registration) at another `https://….cloudfront.net` address
 
-Everything is created inside the Yes Dhobi AWS account (**437045580471**, VASTRA SOLUTIONS PRIVATE LIMITED) in the **Mumbai (ap-south-1)** region.
+Everything is created inside the Yes Dhobi AWS account (**437045580471**, VASTRA SOLUTIONS PRIVATE LIMITED). The deployment currently runs in **Sydney (ap-southeast-2)**, the account's home region — that is what the scripts default to. To host in India instead, prefix every deploy command with `AWS_REGION=ap-south-1` (lower latency for Indian users, and data stays in India); do this before the first deploy, because moving an existing stack means recreating it.
 
 > **Cost:** about ₹3,000/month (≈ $35) in the first year, ≈ ₹4,000/month after (the database is free for 12 months). Nothing here is a one-time purchase; you can delete everything at any time (see Part 9).
 
@@ -75,7 +75,7 @@ You now have a folder `C:\Users\<you>\yesdhobi` containing `yes-dhobi` (website 
 AWS will only accept commands from your laptop if it has a key. You create the key in the AWS website.
 
 1. Go to <https://console.aws.amazon.com> and sign in with **admin@yesdhobi.com** and its password.
-2. **Check the region** (top-right corner of the page, next to your name). If it does not say **Asia Pacific (Mumbai) ap-south-1**, click it and choose **Asia Pacific (Mumbai)**.
+2. **Check the region** (top-right corner of the page, next to your name). It must match the region the backend is deployed in — **Asia Pacific (Sydney) ap-southeast-2** unless you chose Mumbai.
 3. In the **search bar at the very top**, type `IAM` and click **IAM** (it says "Manage access to AWS resources").
 4. In the **left menu** click **Users**.
 5. Click the orange **Create user** button (top right).
@@ -107,7 +107,7 @@ aws configure --profile yesdhobi
 | --- | --- |
 | `AWS Access Key ID` | copy the **Access key** from the AWS page (starts with `AKIA`) |
 | `AWS Secret Access Key` | copy the **Secret access key** |
-| `Default region name` | `ap-south-1` |
+| `Default region name` | `ap-southeast-2` (or `ap-south-1` if you chose Mumbai) |
 | `Default output format` | `json` |
 
 3. Check it worked:
@@ -129,13 +129,13 @@ cd ~/yesdhobi/yes-dhobi/backend && AWS_PROFILE=yesdhobi bash infra/deploy-backen
 ```
 
 2. Leave the window open. You will see:
-   * `==> Deploying yesdhobi-backend to account 437045580471 in ap-south-1`
+   * `==> Deploying yesdhobi-backend to account 437045580471 in ap-southeast-2`
    * `==> Phase 1/3: creating infrastructure …` — **this step takes 10–15 minutes** (the database is being created). It's normal for nothing to print for several minutes.
    * `==> Phase 2/3: building the API image …` then dots `....` for 3–5 minutes, then `build succeeded`.
    * `==> Phase 3/3: applying parameters and starting the service` and `waiting for the service to become stable` (2–3 minutes).
-   * Finally: `==> API is up: http://yesdhobi-alb-….ap-south-1.elb.amazonaws.com/health` followed by `{"status":"ok",…}`.
+   * Finally: `==> API is up: http://yesdhobi-alb-….ap-southeast-2.elb.amazonaws.com/health` followed by `{"status":"ok",…}`.
 
-3. **Copy that API address** (everything before `/health`) into a notepad — you need it later. Example: `http://yesdhobi-alb-123456789.ap-south-1.elb.amazonaws.com`
+3. **Copy that API address** (everything before `/health`) into a notepad — you need it later. Example: `http://yesdhobi-alb-123456789.ap-southeast-2.elb.amazonaws.com`
 
 4. Test it in your browser: open `<API address>/health` — you should see `{"status":"ok"…}`.
 
@@ -240,7 +240,7 @@ To send real SMS you need (a) permission from the Indian telecom regulator (DLT)
 
 **Option A — AWS SNS** (stays inside the AWS account you already have)
 1. Register on your operator's **DLT portal** (Jio/Airtel/Vi): create an *Entity* (get the **Entity ID**), register a **Sender ID** (6 letters, e.g. `YESDHB`) and an **OTP template** whose text matches ours: `{#var#} is your Yes Dhobi verification code. Valid for {#var#} minutes.` → you get a **Template ID**.
-2. AWS console → **SNS** → **Text messaging (SMS)** → *Request production access* (exit the sandbox), then register your Sender ID / DLT details under **Sender IDs**.
+2. AWS console → **SNS** (same region as the backend) → **Text messaging (SMS)** → *Request production access* (exit the sandbox), then register your Sender ID / DLT details under **Sender IDs**.
 3. Redeploy with the values from step 1:
 ```bash
 cd ~/yesdhobi/yes-dhobi/backend && PARAMS="SmsProvider=sns OtpDevMode=false SeedOnBoot=false SmsSenderId=YESDHB SmsDltEntityId=<entity id> SmsOtpTemplateId=<template id>" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
@@ -265,12 +265,12 @@ The response must **not** contain `devOtp` any more, and the SMS should arrive w
 3. Add `MailProvider=ses MailFrom="Yes Dhobi <no-reply@yesdhobi.com>"` to the `PARAMS` in the command above and redeploy.
 
 ### 11.3 Your own domain names (https://api.yesdhobi.com, admin.yesdhobi.com, yesdhobi.com)
-1. AWS console → **Certificate Manager** (region **Mumbai**) → **Request** → public certificate → domain `api.yesdhobi.com` → DNS validation → add the CNAME it shows at your registrar → wait for *Issued* → copy its **ARN** (`arn:aws:acm:ap-south-1:…`).
+1. AWS console → **Certificate Manager** (same region as the backend) → **Request** → public certificate → domain `api.yesdhobi.com` → DNS validation → add the CNAME it shows at your registrar → wait for *Issued* → copy its **ARN** (`arn:aws:acm:<region>:…`).
 2. Change region (top-right) to **US East (N. Virginia)** → Certificate Manager → request one certificate covering `yesdhobi.com`, `www.yesdhobi.com`, `admin.yesdhobi.com` → validate the same way → copy its ARN. (CloudFront only accepts certificates from this region.)
 3. Redeploy:
 
 ```bash
-cd ~/yesdhobi/yes-dhobi/backend && PARAMS="CertificateArn=<mumbai cert ARN> PublicBaseUrl=https://api.yesdhobi.com CorsOrigins=https://admin.yesdhobi.com,https://yesdhobi.com" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
+cd ~/yesdhobi/yes-dhobi/backend && PARAMS="CertificateArn=<backend-region cert ARN> PublicBaseUrl=https://api.yesdhobi.com CorsOrigins=https://admin.yesdhobi.com,https://yesdhobi.com" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
 ```
 ```bash
 cd ~/yesdhobi/yes-dhobi/backend && PARAMS="AdminDomainName=admin.yesdhobi.com WebDomainName=yesdhobi.com CertificateArn=<virginia cert ARN>" AWS_PROFILE=yesdhobi bash infra/deploy-frontends.sh

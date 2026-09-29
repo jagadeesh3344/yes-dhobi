@@ -9,7 +9,7 @@ One API + realtime server for all four Yes Dhobi frontends. Lives in `backend/` 
 | 3 | Vendor web registration (React) | `jagadeesh3344/yes-dhobi` (repo root) | works **without code changes** (same URL + payload) → §3.4 |
 | 4 | Admin panel (React) | `jagadeesh3344/Yes-dhobi-admin-panel` | every page & modal covered, responses match `types.ts` → §3.5 |
 
-**Stack:** Node 22 · TypeScript · Express · Prisma · PostgreSQL · Socket.IO · Zod · JWT. **Hosting:** AWS (ap-south-1) — RDS, ECS Fargate, S3, CloudFront; see §6.
+**Stack:** Node 22 · TypeScript · Express · Prisma · PostgreSQL · Socket.IO · Zod · JWT. **Hosting:** AWS — RDS, ECS Fargate + ALB, S3, CloudFront; see §6.
 **Tests:** 28 integration tests (`npm test`) walk the full order lifecycle across all roles plus every frontend payload shape.
 
 ---
@@ -283,15 +283,13 @@ Run the API with `CORS_ORIGINS=*` and `PUBLIC_BASE_URL=http://<LAN-IP>:4000` (so
 
 ---
 
-## 6. Deployment — AWS (ap-south-1, Mumbai)
+## 6. Deployment — AWS
 
 > **Guides:** [DEPLOY.md](DEPLOY.md) (click-by-click AWS deployment) · [TESTING.md](TESTING.md) (how to test everything, Postman collection in `postman/`)
 >
 > **New to AWS? Use [DEPLOY.md](DEPLOY.md)** — a click-by-click guide that assumes no AWS or terminal experience. This section is the short technical version.
 
-Everything runs in the Yes Dhobi AWS account (**437045580471**, VASTRA SOLUTIONS PRIVATE LIMITED). All resources are defined as CloudFormation in `infra/` so the setup is reproducible and reviewable.
-
-> Why Mumbai: the account's home region shows *Asia Pacific (Sydney) ap-southeast-2*, which is Australia — that is only the account setting, not where services must run. `ap-south-1` keeps latency low for Indian users and data inside India.
+Everything runs in the Yes Dhobi AWS account (**437045580471**, VASTRA SOLUTIONS PRIVATE LIMITED), currently in **ap-southeast-2 (Sydney)** — the scripts default to it. Prefix any deploy command with `AWS_REGION=ap-south-1` to host in Mumbai instead (lower latency for Indian users; decide before the first deploy). All resources are defined as CloudFormation in `infra/` so the setup is reproducible and reviewable.
 
 ### 6.1 What gets created
 
@@ -320,7 +318,7 @@ AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
 
 First run takes ~15 minutes (RDS). The script: creates the stack with the service scaled to 0 → runs CodeBuild to build and push the image from GitHub `main` → scales the service to 1 → waits until `/health` responds → prints the API URL (`http://<alb-dns>`).
 
-Options via `PARAMS`, e.g. once you have a domain and an ACM certificate **in ap-south-1**:
+Options via `PARAMS`, e.g. once you have a domain and an ACM certificate **in the backend's region**:
 
 ```bash
 PARAMS="CertificateArn=arn:aws:acm:ap-south-1:437045580471:certificate/... PublicBaseUrl=https://api.yesdhobi.com CorsOrigins=https://admin.yesdhobi.com,https://yesdhobi.com SmsProvider=sns MailProvider=ses OtpDevMode=false SeedOnBoot=false" \

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Deploys / updates the Yes Dhobi backend on AWS (ap-south-1 by default).
+# Deploys / updates the Yes Dhobi backend on AWS (ap-southeast-2 by default;
+# override with AWS_REGION=ap-south-1 for a Mumbai deployment).
 #
 #   AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
 #

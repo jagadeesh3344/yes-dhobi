@@ -35,7 +35,7 @@ Because the two phone apps are not connected yet, we test *what the apps will do
 Do this once. Every line must pass before testing anything else; if one fails, fix it with [DEPLOY.md](DEPLOY.md) first.
 
 1. **Collect the three addresses** from the deployment (the person who ran DEPLOY.md has them):
-   * `API` — e.g. `http://yesdhobi-alb-123456.ap-south-1.elb.amazonaws.com`
+   * `API` — e.g. `http://yesdhobi-alb-123456.ap-southeast-2.elb.amazonaws.com`
    * `ADMIN` — e.g. `https://d1abc123.cloudfront.net`
    * `WEB` — e.g. `https://d2xyz456.cloudfront.net`
 2. Open **`API/health`** in Chrome → you must see `{"status":"ok","service":"yesdhobi-api",…}`. ❌ If the page doesn't load: the API is down (DEPLOY.md Part 9 "Is the API running?").
@@ -55,7 +55,7 @@ Do this once. Every line must pass before testing anything else; if one fails, f
 2. **Postman**: download from <https://www.postman.com/downloads/> → install → open → you can skip creating an account ("Continue without an account" / lightweight API client).
 3. **Import the test collection**: Postman → **File → Import** → **files** → pick `backend/postman/YesDhobi.postman_collection.json` from this repo (download the repo as ZIP from GitHub → *Code → Download ZIP* if you don't have it). A collection called **Yes Dhobi API** appears on the left with folders *0. Public, 1. Customer, 2. Vendor, 3. Rider, 4. Admin*.
 4. **Point it at your API**: click the collection name → **Variables** tab → in the *Current value* column set:
-   * `baseUrl` = `API` + `/api/v1` → e.g. `http://yesdhobi-alb-123456.ap-south-1.elb.amazonaws.com/api/v1`
+   * `baseUrl` = `API` + `/api/v1` → e.g. `http://yesdhobi-alb-123456.ap-southeast-2.elb.amazonaws.com/api/v1`
    * `apiOrigin` = `API` (no `/api/v1`)
    * `adminPassword` = the admin password
    * `customerPhone`, `newRiderPhone`, `newVendorPhone` = three 10-digit numbers that are **not real customers'** numbers (e.g. `9811122233`). Change them each time you want a "brand-new" signup.
@@ -287,7 +287,7 @@ Order/user:   YD-100012 / 98xxxxxxx
 
 ## Part 11 — The database: what it is, how to see it
 
-* **Where:** Amazon RDS PostgreSQL in Mumbai, name `yesdhobi-db`. It is **private** — nothing on the internet can connect to it directly, only the API. That is deliberate.
+* **Where:** Amazon RDS PostgreSQL (region of the deployment, ap-southeast-2 by default), name `yesdhobi-db`. It is **private** — nothing on the internet can connect to it directly, only the API. That is deliberate.
 * **Normal way to look at data: the admin panel.** Customers, Vendors, Riders, Orders, Payouts, Tickets, Settings — everything a person needs is there. You never need to open the database for testing.
 * **Backups:** automatic every day, kept 7 days. AWS console → **RDS** → **Snapshots**. To restore: select a snapshot → **Restore** (makes a copy; ask the developer before doing this).
 * **Password:** stored in AWS **Secrets Manager** as `yesdhobi/db`; the API reads it automatically. Nobody needs to type it.

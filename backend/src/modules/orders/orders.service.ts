@@ -9,7 +9,7 @@ import { buildQuote, type QuoteItemInput } from '../../services/pricing.js';
 import { getSettings } from '../../services/settings.js';
 import { notifyAdmins, notifyUser } from '../../services/notifications.js';
 import { addEvent, broadcastOrder, loadOrder, transitionOrder } from '../../services/orders.js';
-import { offerLeg } from '../../services/dispatch.js';
+import { startRiderDispatch } from '../../services/dispatch.js';
 
 export interface CreateOrderInput {
   customerId: string;
@@ -27,7 +27,12 @@ export interface CreateOrderInput {
   actorUserId?: string;
 }
 
-/** Pick the best laundry partner for an order: active, offers the service, nearest. */
+/**
+ * Nearest suitable laundry partner (admin helper / fallback).
+ * The live flow no longer pre-assigns a partner at order creation: a rider is
+ * found first, and only then does `startVendorDispatch` offer the order to
+ * partners one at a time (see services/dispatch.ts).
+ */
 export async function chooseVendor(opts: { lat?: number | null; lng?: number | null; city?: string | null; serviceCategoryIds: number[] }) {
   const vendors = await prisma.vendor.findMany({
     where: {
@@ -109,15 +114,17 @@ export async function createOrder(input: CreateOrderInput) {
       ),
     ),
   ];
-  const vendor = input.vendorId
-    ? await prisma.vendor.findUnique({ where: { id: input.vendorId } })
-    : await chooseVendor({ lat: address.lat, lng: address.lng, city: address.city, serviceCategoryIds: categoryIds });
+  // A laundry partner is NOT chosen here. The order is offered to riders first;
+  // once a rider accepts, `startVendorDispatch` offers the order to partners one
+  // at a time (nearest first). Admins may still pin a partner up front.
+  const vendor = input.vendorId ? await prisma.vendor.findUnique({ where: { id: input.vendorId } }) : null;
   const zoneId = await resolveZone(address.lat, address.lng, address.city);
   const dist =
     vendor && address.lat != null && address.lng != null && vendor.latitude != null && vendor.longitude != null
       ? round2(distanceKm(address.lat, address.lng, vendor.latitude, vendor.longitude))
       : null;
 
+  // provisional split using the platform default; recalculated when a partner accepts
   const settings = await getSettings();
   const commissionRate = vendor?.commissionRate ?? settings.vendorCommissionRate;
   const vendorEarning = round2(quote.subtotal * (1 - commissionRate / 100));
@@ -144,6 +151,7 @@ export async function createOrder(input: CreateOrderInput) {
         customerId: customer.id,
         addressId,
         vendorId: vendor?.id,
+        vendorAcceptedAt: vendor ? new Date() : null,
         zoneId,
         addressLine,
         addressLat: address!.lat,
@@ -156,6 +164,7 @@ export async function createOrder(input: CreateOrderInput) {
         deliveryEta,
         notes: input.notes,
         serviceSummary: quote.serviceSummary,
+        serviceCategoryIds: categoryIds,
         itemsCount: quote.itemsCount,
         itemsDescription: quote.itemsDescription,
         estimatedWeightKg: quote.estimatedWeightKg,
@@ -225,13 +234,14 @@ export async function createOrder(input: CreateOrderInput) {
   });
   if (vendor) {
     await notifyUser(vendor.userId, {
-      title: 'New order request',
+      title: 'New order assigned',
       message: `${customer.user.name} • ${order.itemsCount} items • ${order.serviceSummary}`,
       type: 'ORDER',
       data: { orderId: order.id },
     });
   }
-  offerLeg(order.id, 'PICKUP').catch((err) => logger.warn({ err, orderId: order.id }, 'initial dispatch failed'));
+  // find a rider first; the laundry partner search starts when a rider accepts
+  startRiderDispatch(order.id, 'PICKUP').catch((err) => logger.warn({ err, orderId: order.id }, 'initial dispatch failed'));
 
   return full;
 }

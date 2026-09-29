@@ -184,18 +184,39 @@ Two order status labels are new to the panel and should be added to its `OrderSt
 ## 4. How the business flow works (all four apps together)
 
 ```
-customer places order ──► nearest ACTIVE vendor auto-assigned ──► vendor "New Requests" (accept/reject)
-        │
-        └─► pickup OFFER to online riders (45 s) ──► rider accepts ──► ASSIGNED
-rider at door: weigh (optional) → enters customer's pickup OTP ──► PICKED_UP
-rider at shop: enters vendor's drop OTP ──► IN_LAUNDRY  (rider earns pickup payout)
-vendor: WASHING → IRONING → QUALITY_CHECK → READY + book rider ──► delivery OFFER to riders
-delivery rider: enters vendor's handover OTP ──► OUT_FOR_DELIVERY
-at customer: enters customer's delivery OTP ──► DELIVERED  (vendor & rider earnings booked, COD marked paid)
-vendor / rider: request payout ──► admin processes ──► ledger settled
+customer places order
+        |
+        v
+RIDER SEARCH (waterfall)  nearest rider gets the offer for 45 s
+   declines / no answer -> next nearest rider, immediately
+   list exhausted       -> radius doubles once -> then admins are alerted
+        |
+   a rider accepts  -> order ASSIGNED, rider heads to the customer
+        |
+        +--> PARTNER SEARCH starts in parallel (waterfall)
+             nearest laundry partner gets the offer for 90 s
+                declines / no answer -> next nearest partner, immediately
+                list exhausted       -> radius doubles once -> then admins are alerted
+             a partner accepts -> rider is pushed the drop-off address
+        v
+rider at door: weigh (optional) -> customer's pickup OTP  -> PICKED_UP
+rider at shop: vendor's drop OTP                          -> IN_LAUNDRY   (rider earns pickup payout)
+partner: WASHING -> IRONING -> QUALITY_CHECK -> READY + book rider
+        |
+        v
+DELIVERY RIDER SEARCH (same waterfall from the shop)
+delivery rider: vendor's handover OTP -> OUT_FOR_DELIVERY
+at customer: customer's delivery OTP  -> DELIVERED   (partner + rider earnings booked, COD marked paid)
+partner / rider request payout -> admin processes -> ledger settled
 ```
 
-Money: `total = subtotal + surcharges (express/Sunday/heavy-load rules) + deliveryFee (free above ₹120) − coupon + tax`. Vendor earns `subtotal × (1 − commission%)`; riders earn `riderBaseFee + perKm × distance` per leg. All tunable in **Admin → Settings** and **Services → Surcharges**.
+**Only one candidate ever holds an offer.** Offers are never broadcast to a group, so two riders can never race for the same job, and a decline costs the customer nothing but a few seconds.
+
+**Why the partner is chosen after the rider:** the clothes cannot move until a rider is found, and partner capacity changes minute to minute. Matching the partner while the rider is already driving to the customer keeps the promise realistic and lets a busy shop pass without delaying the pickup.
+
+Tuning (env / CloudFormation parameters): `PICKUP_REQUEST_TTL_SECONDS` (45), `VENDOR_REQUEST_TTL_SECONDS` (90), `DISPATCH_RADIUS_KM` (8, doubled on the second round), `DISPATCH_MAX_CANDIDATES` (15).
+
+Money: `total = subtotal + surcharges (express/Sunday/heavy-load rules) + deliveryFee (free above ₹120) − coupon + tax`. The partner's share (`subtotal × (1 − commission%)`) is recalculated when that partner accepts, because each shop can have its own commission rate. Riders earn `riderBaseFee + perKm × distance` per leg. All tunable in **Admin → Settings** and **Services → Surcharges**.
 
 ---
 

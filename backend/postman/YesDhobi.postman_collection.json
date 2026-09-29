@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "cdee8fbc-7f52-4212-92b6-e1959af574fa",
+    "_postman_id": "04e6ea41-61a6-451d-9c3e-3b39d1d26583",
     "name": "Yes Dhobi API",
-    "description": "Manual test collection for the Yes Dhobi backend. Set baseUrl (…/api/v1) and apiOrigin, then run folders in order: Public -> Customer -> Vendor -> Rider (see TESTING.md).",
+    "description": "Manual test collection for the Yes Dhobi backend. Set baseUrl (…/api/v1) and apiOrigin, then run folders in this order: Public -> Customer (place order) -> Rider (accept pickup) -> Vendor (accept the offer that appears once a rider accepted) -> Rider (OTP handoffs) -> Admin. See TESTING.md.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -1165,7 +1165,52 @@
           ]
         },
         {
-          "name": "2. Orders - new requests",
+          "name": "2. Open offers (waterfall)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/vendors/me/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "vendors",
+                "me",
+                "requests"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{vendorToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "An order reaches this list only after a RIDER has accepted the pickup. It is offered to one partner at a time, nearest first; declining passes it to the next partner."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json(); if (b.data && b.data.length) { pm.collectionVariables.set(\"orderId\", b.data[0].orderId); console.log(\"offer for\", b.data[0].orderNumber, \"payout\", b.data[0].payout, \"expires in\", b.data[0].remainingSeconds, \"s\"); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2b. Orders - new requests (same list, app format)",
           "request": {
             "method": "GET",
             "header": [
@@ -1293,7 +1338,7 @@
           }
         },
         {
-          "name": "5. Reject order",
+          "name": "5. Reject order (passes to the next nearest partner)",
           "request": {
             "method": "POST",
             "header": [
@@ -2198,7 +2243,7 @@
           }
         },
         {
-          "name": "9b. Decline request",
+          "name": "9b. Decline request (passes to the next nearest rider)",
           "request": {
             "method": "POST",
             "header": [
@@ -2238,7 +2283,8 @@
                   "type": "string"
                 }
               ]
-            }
+            },
+            "description": "The offer moves to the next nearest rider immediately - no admin action, no waiting for a timeout."
           }
         },
         {
@@ -2881,7 +2927,7 @@
           }
         },
         {
-          "name": "7. Re-dispatch pickup offers",
+          "name": "7. Restart rider search",
           "request": {
             "method": "POST",
             "header": [
@@ -2910,6 +2956,83 @@
                   "language": "json"
                 }
               }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "7b. Restart laundry partner search",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/orders/{{orderId}}/dispatch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "orders",
+                "{{orderId}}",
+                "dispatch"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leg\": \"VENDOR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "7c. Cascade status (who holds the offer now)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/orders/{{orderId}}/dispatch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "orders",
+                "{{orderId}}",
+                "dispatch"
+              ]
             },
             "auth": {
               "type": "bearer",

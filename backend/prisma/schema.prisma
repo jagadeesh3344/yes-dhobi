@@ -319,10 +319,11 @@ model Vendor {
   zones         VendorZone[]
   services      VendorService[]
   equipments    VendorEquipment[]
-  orders        Order[]
-  ledgerEntries LedgerEntry[]
-  payouts       Payout[]
-  verifications Verification[]
+  orders         Order[]
+  vendorRequests VendorRequest[]
+  ledgerEntries  LedgerEntry[]
+  payouts        Payout[]
+  verifications  Verification[]
 
   @@index([status, city])
 }
@@ -482,6 +483,8 @@ model Order {
   notes               String?
   // description
   serviceSummary      String
+  /// service categories this order needs; used to match a laundry partner after the rider accepts
+  serviceCategoryIds  Int[]         @default([])
   itemsCount          Int
   itemsDescription    String
   estimatedWeightKg   Float?
@@ -524,6 +527,8 @@ model Order {
   items          OrderItem[]
   events         OrderEvent[]
   pickupRequests PickupRequest[]
+  vendorRequests VendorRequest[]
+  dispatches     Dispatch[]
   payments       Payment[]
   walletTxns     WalletTransaction[]
   ledgerEntries  LedgerEntry[]
@@ -601,6 +606,77 @@ model PickupRequest {
 
   @@index([riderId, status])
   @@index([orderId, leg, status])
+}
+
+enum VendorRequestStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+/// An offer of one order to one laundry partner (created after a rider accepts
+/// the pickup). Offers are made one partner at a time, nearest first.
+model VendorRequest {
+  id          String              @id @default(cuid())
+  orderId     String
+  vendorId    String
+  status      VendorRequestStatus @default(OFFERED)
+  distanceKm  Float?
+  payout      Decimal             @db.Decimal(12, 2)
+  offeredAt   DateTime            @default(now())
+  expiresAt   DateTime
+  respondedAt DateTime?
+  declineReason String?
+
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, status])
+  @@index([orderId, status])
+}
+
+enum DispatchKind {
+  RIDER_PICKUP
+  RIDER_DELIVERY
+  VENDOR
+}
+
+enum DispatchStatus {
+  ACTIVE
+  FULFILLED
+  EXHAUSTED
+  CANCELLED
+}
+
+/// Drives the waterfall: candidates are ranked nearest-first and offered one at
+/// a time. When the holder declines or the offer expires, the cursor moves to
+/// the next candidate. When the list runs out the radius widens once, then
+/// admins are alerted.
+model Dispatch {
+  id             String         @id @default(cuid())
+  orderId        String
+  kind           DispatchKind
+  status         DispatchStatus @default(ACTIVE)
+  /// ordered candidate ids (rider ids or vendor ids), nearest first
+  candidates     String[]
+  /// index of the candidate currently holding the offer
+  cursor         Int            @default(0)
+  /// PickupRequest.id or VendorRequest.id of the live offer
+  currentOfferId String?
+  expiresAt      DateTime?
+  radiusKm       Float?
+  /// 1 = initial radius, 2 = widened radius
+  round          Int            @default(1)
+  exhaustedAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status, expiresAt])
+  @@index([orderId, kind, status])
 }
 
 // ---------------------------------------------------------------------------

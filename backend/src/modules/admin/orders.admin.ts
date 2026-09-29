@@ -10,7 +10,7 @@ import { nextId } from '../../lib/ids.js';
 import { getSettings } from '../../services/settings.js';
 import { riderLegPayout } from '../../services/pricing.js';
 import { addEvent, broadcastOrder, loadOrder, orderInclude, serializeOrder, STATUS_LABEL, transitionOrder } from '../../services/orders.js';
-import { assignRider, offerLeg } from '../../services/dispatch.js';
+import { assignRider, assignVendor, startRiderDispatch, startVendorDispatch } from '../../services/dispatch.js';
 import { notifyUser } from '../../services/notifications.js';
 import { createOrder } from '../orders/orders.service.js';
 
@@ -330,24 +330,90 @@ adminOrdersRouter.post(
   '/:id/assign-vendor',
   asyncHandler(async (req, res) => {
     const { vendorId } = parseBody(z.object({ vendorId: z.string() }), req.body);
-    const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
-    if (!vendor) throw notFound('Vendor');
     const order = await loadOrder(req.params.id!);
-    await prisma.order.update({ where: { id: order.id }, data: { vendorId, vendorAcceptedAt: null } });
-    await addEvent(prisma, order.id, { type: 'VENDOR_ASSIGNED', title: 'Laundry partner assigned', description: vendor.shopName, actorUserId: req.user!.id });
-    await notifyUser(vendor.userId, { title: 'New order assigned', message: `Order ${order.orderNumber} has been assigned to your shop`, type: 'ORDER', data: { orderId: order.id } });
-    res.json(serializeOrder(await broadcastOrder(order.id), 'admin'));
+    // cancels any partner cascade in flight, recalculates the commission split
+    // for this partner and tells the pickup rider where to drop off
+    const updated = await assignVendor(order.id, vendorId, req.user!.id);
+    res.json(serializeOrder(updated, 'admin'));
   }),
 );
 
-/** Re-broadcast a leg to riders (e.g. after all offers expired). */
+/**
+ * Restart a search that ran out of candidates.
+ *   leg PICKUP | DELIVERY -> rider waterfall (optionally limited to `riderIds`)
+ *   leg VENDOR            -> laundry-partner waterfall (optionally `vendorIds`)
+ */
 adminOrdersRouter.post(
   '/:id/dispatch',
   asyncHandler(async (req, res) => {
-    const { leg, riderIds } = parseBody(z.object({ leg: z.enum(['PICKUP', 'DELIVERY']).default('PICKUP'), riderIds: z.array(z.string()).optional() }), req.body ?? {});
+    const { leg, riderIds, vendorIds } = parseBody(
+      z.object({
+        leg: z.enum(['PICKUP', 'DELIVERY', 'VENDOR']).default('PICKUP'),
+        riderIds: z.array(z.string()).optional(),
+        vendorIds: z.array(z.string()).optional(),
+      }),
+      req.body ?? {},
+    );
     const order = await loadOrder(req.params.id!);
-    const notified = await offerLeg(order.id, leg, { riderIds });
-    res.json({ ridersNotified: notified });
+    if (leg === 'VENDOR') {
+      const partnersNotified = await startVendorDispatch(order.id, { vendorIds });
+      res.json({ partnersNotified });
+      return;
+    }
+    const ridersNotified = await startRiderDispatch(order.id, leg, { riderIds });
+    res.json({ ridersNotified });
+  }),
+);
+
+/** Live view of the cascades for an order (who is holding the offer right now). */
+adminOrdersRouter.get(
+  '/:id/dispatch',
+  asyncHandler(async (req, res) => {
+    const order = await loadOrder(req.params.id!);
+    const [dispatches, riderOffers, vendorOffers] = await Promise.all([
+      prisma.dispatch.findMany({ where: { orderId: order.id }, orderBy: { createdAt: 'desc' } }),
+      prisma.pickupRequest.findMany({
+        where: { orderId: order.id },
+        orderBy: { offeredAt: 'desc' },
+        include: { rider: { select: { user: { select: { name: true, phone: true } } } } },
+      }),
+      prisma.vendorRequest.findMany({
+        where: { orderId: order.id },
+        orderBy: { offeredAt: 'desc' },
+        include: { vendor: { select: { shopName: true } } },
+      }),
+    ]);
+    res.json({
+      dispatches: dispatches.map((d) => ({
+        id: d.id,
+        kind: d.kind,
+        status: d.status,
+        attempt: `${Math.min(d.cursor + 1, d.candidates.length)} of ${d.candidates.length}`,
+        radiusKm: d.radiusKm,
+        round: d.round,
+        expiresAt: d.expiresAt,
+      })),
+      riderOffers: riderOffers.map((r) => ({
+        id: r.id,
+        leg: r.leg,
+        status: r.status,
+        riderName: r.rider.user.name,
+        payout: r.payout,
+        distanceKm: r.distanceKm,
+        offeredAt: r.offeredAt,
+        respondedAt: r.respondedAt,
+      })),
+      vendorOffers: vendorOffers.map((v) => ({
+        id: v.id,
+        status: v.status,
+        vendorName: v.vendor.shopName,
+        payout: v.payout,
+        distanceKm: v.distanceKm,
+        offeredAt: v.offeredAt,
+        respondedAt: v.respondedAt,
+        declineReason: v.declineReason,
+      })),
+    });
   }),
 );
 

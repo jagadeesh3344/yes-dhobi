@@ -330,6 +330,9 @@ ridersRouter.post(
     const order = await riderOrder(req.params.id!, req.user!.riderId!);
     if (order.pickupRiderId !== req.user!.riderId) throw forbidden('You are not the pickup rider for this order');
     if (order.status !== 'PICKED_UP') throw unprocessable(`Order is ${order.status}, expected PICKED_UP`);
+    // the partner search runs while the rider is collecting; it is normally done
+    // well before this point, but guard in case no partner has accepted yet
+    if (!order.vendorId) throw unprocessable('The laundry partner is still being confirmed. You will get the drop-off address in a moment.');
     if (otp !== order.vendorDropOtp) throw badRequest('Incorrect vendor OTP');
     const updated = await transitionOrder(order.id, 'IN_LAUNDRY', { actorUserId: req.user!.id, description: `Dropped at ${order.vendor?.shopName ?? 'laundry partner'}` });
     res.json(serializeOrder(updated, 'rider'));

@@ -9,7 +9,8 @@ import { compact, maskAccount } from '../../lib/utils.js';
 import { requireVendor } from '../../middleware/auth.js';
 import { authLimiter } from '../../middleware/rateLimit.js';
 import { addEvent, broadcastOrder, loadOrder, orderInclude, serializeOrder, transitionOrder } from '../../services/orders.js';
-import { offerLeg } from '../../services/dispatch.js';
+import { startVendorDispatch } from '../../services/dispatch.js';
+import { acceptVendorRequest, activeVendorRequest, declineVendorRequest, serializeVendorRequest, startRiderDispatch } from '../../services/dispatch.js';
 import { earningsSummary, partyBalance } from '../../services/ledger.js';
 import { notifyAdmins } from '../../services/notifications.js';
 import { requestPayout } from '../payouts/payouts.service.js';
@@ -182,8 +183,6 @@ const IN_PROGRESS: OrderStatus[] = ['IN_LAUNDRY', 'WASHING', 'IRONING', 'QUALITY
 
 function tabWhere(tab: string): Prisma.OrderWhereInput {
   switch (tab) {
-    case 'new':
-      return { vendorAcceptedAt: null, status: { notIn: ['CANCELLED', 'DELIVERED'] } };
     case 'incoming':
       return { vendorAcceptedAt: { not: null }, status: { in: ['PENDING_PICKUP', 'ASSIGNED', 'PICKED_UP'] } };
     case 'in_progress':
@@ -203,11 +202,65 @@ function tabWhere(tab: string): Prisma.OrderWhereInput {
   }
 }
 
+/**
+ * Open offers waiting for this shop's answer. An order is offered to one partner
+ * at a time (nearest first); if this shop declines or lets it expire, it passes
+ * straight to the next partner.
+ */
+vendorsRouter.get(
+  '/me/requests',
+  asyncHandler(async (req, res) => {
+    const requests = await prisma.vendorRequest.findMany({
+      where: { vendorId: req.user!.vendorId, status: 'OFFERED', expiresAt: { gt: new Date() } },
+      include: { order: { include: orderInclude } },
+      orderBy: { offeredAt: 'desc' },
+    });
+    res.json({ data: requests.map(serializeVendorRequest) });
+  }),
+);
+
+vendorsRouter.post(
+  '/me/requests/:orderId/accept',
+  asyncHandler(async (req, res) => {
+    const vendor = await prisma.vendor.findUnique({ where: { id: req.user!.vendorId } });
+    assertActive(vendor?.status ?? '');
+    const order = await acceptVendorRequest(req.params.orderId!, req.user!.vendorId!);
+    res.json({ ...serializeOrder(order, 'vendor'), isAccepted: true, isRiderBooked: order.deliveryRiderId != null });
+  }),
+);
+
+vendorsRouter.post(
+  '/me/requests/:orderId/decline',
+  asyncHandler(async (req, res) => {
+    const { reason } = parseBody(z.object({ reason: z.string().max(300).optional() }), req.body ?? {});
+    await declineVendorRequest(req.params.orderId!, req.user!.vendorId!, reason);
+    res.json({ message: 'Request declined and passed to the next partner' });
+  }),
+);
+
 vendorsRouter.get(
   '/me/orders',
   asyncHandler(async (req, res) => {
     const q = parseQuery(z.object({ tab: z.enum(['new', 'incoming', 'in_progress', 'ready', 'out_for_delivery', 'active', 'completed', 'cancelled', 'all']).default('all') }), req.query);
     const p = parsePagination(req.query);
+
+    // the "new" tab is the offer queue, not orders already belonging to the shop
+    if (q.tab === 'new') {
+      const requests = await prisma.vendorRequest.findMany({
+        where: { vendorId: req.user!.vendorId, status: 'OFFERED', expiresAt: { gt: new Date() } },
+        include: { order: { include: orderInclude } },
+        orderBy: { offeredAt: 'desc' },
+      });
+      const data = requests.map((r) => ({
+        ...serializeOrder(r.order, 'vendor'),
+        isAccepted: false,
+        isRiderBooked: r.order.deliveryRiderId != null,
+        offer: serializeVendorRequest(r),
+      }));
+      res.json(paginated(data, data.length, { page: 1, limit: Math.max(data.length, 1) }));
+      return;
+    }
+
     const where = { vendorId: req.user!.vendorId, ...tabWhere(q.tab) };
     const [orders, total] = await Promise.all([
       prisma.order.findMany({ where, include: orderInclude, orderBy: { updatedAt: 'desc' }, skip: p.skip, take: p.limit }),
@@ -217,17 +270,25 @@ vendorsRouter.get(
   }),
 );
 
+/** The shop may read an order it owns, or one it is currently being offered. */
 async function vendorOrder(orderId: string, vendorId: string) {
   const order = await loadOrder(orderId);
-  if (order.vendorId !== vendorId) throw notFound('Order');
-  return order;
+  if (order.vendorId === vendorId) return order;
+  if (await activeVendorRequest(order.id, vendorId)) return order;
+  throw notFound('Order');
 }
 
 vendorsRouter.get(
   '/me/orders/:id',
   asyncHandler(async (req, res) => {
     const o = await vendorOrder(req.params.id!, req.user!.vendorId!);
-    res.json({ ...serializeOrder(o, 'vendor'), isAccepted: o.vendorAcceptedAt != null, isRiderBooked: o.deliveryRiderId != null });
+    const offer = o.vendorId === req.user!.vendorId ? null : await activeVendorRequest(o.id, req.user!.vendorId!);
+    res.json({
+      ...serializeOrder(o, 'vendor'),
+      isAccepted: o.vendorId === req.user!.vendorId && o.vendorAcceptedAt != null,
+      isRiderBooked: o.deliveryRiderId != null,
+      offer: offer ? { requestId: offer.id, expiresAt: offer.expiresAt, remainingSeconds: Math.max(0, Math.floor((offer.expiresAt.getTime() - Date.now()) / 1000)), payout: offer.payout } : null,
+    });
   }),
 );
 
@@ -236,13 +297,10 @@ vendorsRouter.post(
   asyncHandler(async (req, res) => {
     const vendor = await prisma.vendor.findUnique({ where: { id: req.user!.vendorId } });
     assertActive(vendor?.status ?? '');
-    const o = await vendorOrder(req.params.id!, req.user!.vendorId!);
-    if (o.vendorAcceptedAt) throw unprocessable('Order already accepted');
-    if (o.status === 'CANCELLED') throw unprocessable('Order was cancelled');
-    await prisma.order.update({ where: { id: o.id }, data: { vendorAcceptedAt: new Date() } });
-    await addEvent(prisma, o.id, { type: 'VENDOR_ACCEPTED', title: 'Accepted by laundry partner', description: vendor!.shopName, actorUserId: req.user!.id });
-    const updated = await broadcastOrder(o.id);
-    res.json({ ...serializeOrder(updated, 'vendor'), isAccepted: true });
+    const o = await loadOrder(req.params.id!);
+    if (o.vendorId === req.user!.vendorId && o.vendorAcceptedAt) throw unprocessable('Order already accepted');
+    const order = await acceptVendorRequest(o.id, req.user!.vendorId!);
+    res.json({ ...serializeOrder(order, 'vendor'), isAccepted: true, isRiderBooked: order.deliveryRiderId != null });
   }),
 );
 
@@ -250,13 +308,23 @@ vendorsRouter.post(
   '/me/orders/:id/reject',
   asyncHandler(async (req, res) => {
     const { reason } = parseBody(z.object({ reason: z.string().max(300).optional() }), req.body ?? {});
-    const o = await vendorOrder(req.params.id!, req.user!.vendorId!);
-    if (o.vendorAcceptedAt || !['PENDING_PICKUP', 'ASSIGNED'].includes(o.status)) throw unprocessable('This order can no longer be rejected. Contact support.');
-    await prisma.order.update({ where: { id: o.id }, data: { vendorId: null } });
-    await addEvent(prisma, o.id, { type: 'VENDOR_REJECTED', title: 'Declined by laundry partner', description: reason ?? o.vendor?.shopName, actorUserId: req.user!.id });
-    await notifyAdmins({ title: 'Vendor declined order', message: `${o.vendor?.shopName} declined ${o.orderNumber}${reason ? `: ${reason}` : ''}. Reassign a partner.`, type: 'VENDOR', data: { orderId: o.id } });
+    const o = await loadOrder(req.params.id!);
+
+    // declining an offer -> passes to the next nearest partner
+    if (await activeVendorRequest(o.id, req.user!.vendorId!)) {
+      await declineVendorRequest(o.id, req.user!.vendorId!, reason);
+      res.json({ message: 'Order declined and passed to the next partner' });
+      return;
+    }
+
+    // giving back an order this shop had already accepted -> restart the search
+    if (o.vendorId !== req.user!.vendorId) throw notFound('Order');
+    if (!['PENDING_PICKUP', 'ASSIGNED', 'PICKED_UP'].includes(o.status)) throw unprocessable('This order can no longer be rejected. Contact support.');
+    await prisma.order.update({ where: { id: o.id }, data: { vendorId: null, vendorAcceptedAt: null } });
+    await addEvent(prisma, o.id, { type: 'VENDOR_DECLINED', title: 'Returned by laundry partner', description: reason ?? o.vendor?.shopName, actorUserId: req.user!.id });
     await broadcastOrder(o.id);
-    res.json({ message: 'Order declined' });
+    const notified = await startVendorDispatch(o.id, {}).catch(() => 0);
+    res.json({ message: 'Order released', partnersNotified: notified });
   }),
 );
 
@@ -280,7 +348,7 @@ vendorsRouter.post(
     if (IN_PROGRESS.includes(o.status)) order = await transitionOrder(o.id, 'READY', { actorUserId: req.user!.id, description: 'Packaged and ready for delivery' });
     if (order.status !== 'READY') throw unprocessable(`Order is ${order.status}; it must be READY to book a rider`);
     if (order.deliveryRiderId) throw unprocessable('A delivery rider is already booked');
-    const notified = await offerLeg(order.id, 'DELIVERY');
+    const notified = await startRiderDispatch(order.id, 'DELIVERY');
     res.json({ ...serializeOrder(await loadOrder(order.id), 'vendor'), ridersNotified: notified, isRiderBooked: false });
   }),
 );
@@ -331,9 +399,10 @@ vendorsRouter.get(
   asyncHandler(async (req, res) => {
     const vendorId = req.user!.vendorId!;
     const count = (tab: string) => prisma.order.count({ where: { vendorId, ...tabWhere(tab) } });
+    const newRequestsCount = prisma.vendorRequest.count({ where: { vendorId, status: 'OFFERED', expiresAt: { gt: new Date() } } });
     const [vendor, newRequests, incoming, inProgress, ready, outForDelivery, completedToday, summary] = await Promise.all([
       prisma.vendor.findUnique({ where: { id: vendorId }, select: { shopName: true, status: true, rating: true, ratingCount: true } }),
-      count('new'),
+      newRequestsCount,
       count('incoming'),
       count('in_progress'),
       count('ready'),

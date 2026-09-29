@@ -116,11 +116,11 @@ Open `WEB` → start partner registration → fill the 5 steps with test data (u
 ### 5.2 Is the **customer side** working? (5 min, Postman → 1. Customer)
 Run **1 → 2b → 3 → 4 → 6** in order. ✅ 1 returns `devOtp: "1234"`; 2b returns tokens and `isNewUser: true`; 3 returns the address with `isDefault: true`; 4 shows `total: 160`; 6 returns `status: "PENDING_PICKUP"` and the order appears in the ADMIN **Orders** page **without refreshing**.
 
-### 5.3 Is the **vendor side** working? (3 min, Postman → 2. Vendor)
-Run **1 → 2 → 3 → 4**. ✅ Login succeeds; the order from 5.2 is in *new requests*; detail shows two 4-digit rider OTPs; accept returns `isAccepted: true` and the ADMIN order detail shows *Accepted by laundry partner* in its timeline.
+### 5.3 Is the **rider side** working? (5 min, Postman → 3. Rider)
+Run **1 → 6 (go online) → 8 → 9 → 11**. ✅ 8 shows the offer for the order from 5.2 (if empty, run *4. Admin → 7. Restart rider search*, then 8 again); 9 makes the order `ASSIGNED`; 11 (the customer pickup OTP is filled in automatically) makes it `PICKED_UP`. ADMIN shows the rider's name on the order.
 
-### 5.4 Is the **rider side** working? (5 min, Postman → 3. Rider)
-Run **1 → 6 (go online) → 8 → 9 → 11**. ✅ 8 lists an offer for the order (if empty, run *4. Admin → 7. Re-dispatch* then 8 again); 9 makes the order `ASSIGNED`; 11 (customer pickup OTP is filled in automatically) makes it `PICKED_UP`. ADMIN shows the rider's name on the order.
+### 5.4 Is the **vendor side** working? (3 min, Postman → 2. Vendor)
+**Do this after 5.3** — a laundry partner is only offered an order once a rider has accepted it. Run **1 → 2 → 3 → 4**. ✅ Login succeeds; *2. Open offers* lists the order with a countdown; detail shows two 4-digit rider OTPs; accept returns `isAccepted: true`, and the rider's order now shows the shop as the drop-off address.
 
 ### 5.5 Is the **admin panel** working? (4 min, browser)
 Orders → change that order's status dropdown to *Washing* → toast *Status Updated*. Customers → the test customer exists. Riders → Rahul Yadav is *On Delivery*. Settings → change commission to 21 → Save → reload → still 21 → set it back to 20.
@@ -217,9 +217,10 @@ Orders → change that order's status dropdown to *Washing* → toast *Status Up
 | R14 | Rider 8 → 9 (DELIVERY offer) → Vendor 3 → Rider 13 → Rider 14 | `OUT_FOR_DELIVERY` → `DELIVERED`, `paymentStatus: PAID` | |
 | R15 | Rider 15 / 16 | earnings summary; payout 201 Pending (min ₹100) | |
 | V1 | Vendor 1 | 200 `status: ACTIVE` | |
-| V2 | Vendor 2 | new order listed, `isAccepted: false` | |
+| V2 | Vendor 2 (open offers) | the order appears only after a rider accepted it; `remainingSeconds` counts down | |
 | V3 | Vendor 3 | `otps.riderDrop`, `otps.riderHandover` | |
-| V4 | Vendor 4; then 5 | accepted; reject → 422 | |
+| V4 | Vendor 4 (accept) | `isAccepted: true`; the rider immediately gets the drop-off address | |
+| V4b | Vendor 5 (reject) on a fresh offer | 200 "passed to the next partner"; the next nearest shop now holds it | |
 | V5 | Vendor 8 (after R14) | today's amount = subtotal × 80% | |
 | V6 | Vendor 9 | 201 Pending → admin A38 | |
 | V7 | Vendor 10 / 10b | services listed; price updated | |
@@ -227,11 +228,11 @@ Orders → change that order's status dropdown to *Washing* → toast *Status Up
 
 ## Part 9 — Golden path (one full order, all roles, ~15 min)
 
-Keep ADMIN → Orders visible; every step updates live.
+Keep ADMIN → Orders visible; every step updates live. **Note the order: a rider is found first, and only then is a laundry partner offered the job.**
 
 1. Customer: 1 → 2b → 3 → 6 (note the console line with both OTPs).
-2. Vendor: 1 → 2 → 4 (accept).
-3. Rider: 1 → 6 (online) → 8 → 9 (accept) → 11 (pickup) → Vendor 3 (fills drop OTP) → Rider 12 (drop-off).
+2. Rider: 1 → 6 (online) → 8 → 9 (accept the pickup).
+3. Vendor: 1 → 2 (the offer has now appeared) → 4 (accept) → Rider: 11 (pickup) → Vendor 3 (fills drop OTP) → Rider 12 (drop-off).
 4. Vendor: 6 → 6b → 6c → 7 (book rider).
 5. Rider: 8 → 9 (delivery offer) → Vendor 3 (handover OTP) → Rider 13 → Rider 14.
 6. Customer: 10 (all steps done) → 18 (rate 5★).
@@ -239,6 +240,25 @@ Keep ADMIN → Orders visible; every step updates live.
 8. Admin order detail: Delivered, Paid, rider + vendor names, rating 5.
 
 ## Part 10 — Security & edge cases
+
+### 10.1 The waterfall (what the client asked for)
+
+These are covered by automated tests (`npm test`, file `tests/dispatch-cascade.test.ts`), and you can reproduce them by hand with two or three rider logins:
+
+| ID | Test | Steps | Expected | Result |
+| --- | --- | --- | --- | --- |
+| W1 | One rider at a time | Place an order, then check *8. Open requests* as each of the three seeded riders | Only the **nearest** rider sees it. The others see nothing | |
+| W2 | Decline passes it on | Nearest rider runs *9b. Decline* | The second-nearest rider sees it within a second, with no admin action | |
+| W3 | Declined offer is dead | The first rider now runs *9. Accept* on the same request id | 409 conflict | |
+| W4 | No answer | Leave the offer untouched for the offer window (45 s by default) | It expires and the next rider gets it automatically | |
+| W5 | Everyone declines | All riders decline | Admin gets a "Rider needed" notification; `GET /admin/orders/:id/dispatch` shows the cascade as `EXHAUSTED`; admin can restart the search or assign directly | |
+| W6 | Partner comes after the rider | Place an order and check the vendor's *2. Open offers* **before** any rider accepts | Empty — no partner is offered yet, and the order has no `vendor` | |
+| W7 | Partner search starts on acceptance | A rider accepts | Within a second the nearest partner has an offer with a countdown | |
+| W8 | Partner decline cascades | That partner runs *5. Reject* | The next nearest partner is offered it immediately; the order still has no partner until someone accepts | |
+| W9 | Rider learns the drop-off | A partner accepts | The rider's order detail now shows the shop's name and address (socket event `order:dropoff_assigned`) | |
+| W10 | All partners decline | Every partner declines | Admin gets "Laundry partner needed"; `POST /admin/orders/:id/assign-vendor` still works and sets that partner's commission | |
+
+### 10.2 Permissions and limits
 
 | ID | Test | Expected | Result |
 | --- | --- | --- | --- |
@@ -250,6 +270,7 @@ Keep ADMIN → Orders visible; every step updates live.
 | X6 | Website: submit with an existing phone | error "already exists" shown | |
 | X7 | Website: 10 MB image | rejected; 6 MB accepted | |
 | X8 | Any action on a cancelled order | 409/422, never 500 | |
+| X9 | Rider tries drop-off before a partner accepted | 422 "laundry partner is still being confirmed" | |
 
 **Bug report template** (paste into WhatsApp/email to the developer):
 ```
@@ -285,7 +306,7 @@ Order/user:   YD-100012 / 98xxxxxxx
 * **Who can do what:** the admin panel is for staff only — do not give its address to vendors or riders (they get the app).
 * **Where to look when something is wrong:** CloudWatch logs (Part 1 step 7) first; then the bug template above.
 * **Redeploying after a fix:** DEPLOY.md Part 9 — one command each for the API and the websites. Re-run Part 5 quick checks after every redeploy.
-* **Automated tests** run by the developer before every release: `cd backend && npm test` (28 tests) — ask for the "28 passed" line.
+* **Automated tests** run by the developer before every release: `cd backend && npm test` (36 tests) — ask for the "36 passed" line.
 
 ---
 

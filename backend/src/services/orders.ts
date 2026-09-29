@@ -339,9 +339,18 @@ export async function transitionOrder(orderId: string, next: OrderStatus, opts: 
       await tx.rider.update({ where: { id: order.pickupRiderId }, data: { totalDeliveries: { increment: 1 }, availability: 'ONLINE' } });
     }
     if (next === 'CANCELLED') {
+      // stop every open cascade and offer
       await tx.pickupRequest.updateMany({
         where: { orderId, status: 'OFFERED' },
         data: { status: 'CANCELLED', respondedAt: now },
+      });
+      await tx.vendorRequest.updateMany({
+        where: { orderId, status: 'OFFERED' },
+        data: { status: 'CANCELLED', respondedAt: now },
+      });
+      await tx.dispatch.updateMany({
+        where: { orderId, status: 'ACTIVE' },
+        data: { status: 'CANCELLED', currentOfferId: null, expiresAt: null },
       });
       for (const riderId of [order.pickupRiderId, order.deliveryRiderId]) {
         if (riderId) await tx.rider.update({ where: { id: riderId }, data: { availability: 'ONLINE' } });

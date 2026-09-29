@@ -36,8 +36,13 @@ const schema = z.object({
   MAIL_FROM: z.string().default('Yes Dhobi <no-reply@yesdhobi.com>'),
   AWS_REGION: z.string().optional(),
 
+  /** how long one rider holds a pickup/delivery offer before it passes to the next rider */
   PICKUP_REQUEST_TTL_SECONDS: z.coerce.number().default(45),
+  /** how long one laundry partner holds an order offer before it passes to the next partner */
+  VENDOR_REQUEST_TTL_SECONDS: z.coerce.number().default(90),
   DISPATCH_RADIUS_KM: z.coerce.number().default(8),
+  /** how many candidates are queued per cascade round */
+  DISPATCH_MAX_CANDIDATES: z.coerce.number().default(15),
 
   UPLOAD_DIR: z.string().default('uploads'),
   MAX_UPLOAD_MB: z.coerce.number().default(8),

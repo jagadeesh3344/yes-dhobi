@@ -80,6 +80,21 @@ Parameters:
   TwilioFrom:
     Type: String
     Default: ''
+  PickupRequestTtlSeconds:
+    Type: String
+    Default: '45'
+    Description: Seconds one rider holds a pickup/delivery offer before it passes to the next rider
+  VendorRequestTtlSeconds:
+    Type: String
+    Default: '90'
+    Description: Seconds one laundry partner holds an order offer before it passes to the next partner
+  DispatchRadiusKm:
+    Type: String
+    Default: '8'
+    Description: Initial search radius; doubles once if every candidate declines
+  DispatchMaxCandidates:
+    Type: String
+    Default: '15'
   MailProvider:
     Type: String
     Default: console
@@ -427,6 +442,10 @@ Resources:
             - { Name: OTP_DEV_MODE, Value: !Ref OtpDevMode }
             - { Name: SMS_PROVIDER, Value: !Ref SmsProvider }
             - { Name: SMS_SENDER_ID, Value: !Ref SmsSenderId }
+            - { Name: PICKUP_REQUEST_TTL_SECONDS, Value: !Ref PickupRequestTtlSeconds }
+            - { Name: VENDOR_REQUEST_TTL_SECONDS, Value: !Ref VendorRequestTtlSeconds }
+            - { Name: DISPATCH_RADIUS_KM, Value: !Ref DispatchRadiusKm }
+            - { Name: DISPATCH_MAX_CANDIDATES, Value: !Ref DispatchMaxCandidates }
             - { Name: SMS_DLT_ENTITY_ID, Value: !Ref SmsDltEntityId }
             - { Name: SMS_OTP_TEMPLATE_ID, Value: !Ref SmsOtpTemplateId }
             - { Name: MSG91_AUTH_KEY, Value: !Ref Msg91AuthKey }

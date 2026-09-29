@@ -115,7 +115,8 @@ describe('order lifecycle', () => {
     expect(res.body.status).toBe('PENDING_PICKUP');
     expect(res.body.orderNumber).toMatch(/^YD-\d+$/);
     expect(res.body.pricing.total).toBe(160);
-    expect(res.body.vendor.id).toBe(vendorId); // nearest active vendor to HSR Layout
+    // a laundry partner is matched only after a rider accepts (waterfall)
+    expect(res.body.vendor).toBeNull();
     expect(res.body.otps.pickup).toMatch(/^\d{4}$/);
     orderId = res.body.id;
     customerPickupOtp = res.body.otps.pickup;
@@ -128,21 +129,35 @@ describe('order lifecycle', () => {
     expect(offers.body.data.some((o: { orderId: string }) => o.orderId === orderId)).toBe(true);
   });
 
-  it('vendor sees it as a new request and accepts', async () => {
-    const list = await api().get('/api/v1/vendors/me/orders?tab=new').set(auth(vendorToken));
-    expect(list.body.data.some((o: { id: string }) => o.id === orderId)).toBe(true);
-    const accept = await api().post(`/api/v1/vendors/me/orders/${orderId}/accept`).set(auth(vendorToken));
-    expect(accept.status).toBe(200);
-    expect(accept.body.isAccepted).toBe(true);
-  });
-
-  it('rider accepts the pickup offer -> ASSIGNED', async () => {
+  it('rider accepts the pickup offer -> ASSIGNED, which starts the partner search', async () => {
     const offers = await api().get('/api/v1/riders/me/requests').set(auth(riderToken));
     const offer = offers.body.data.find((o: { orderId: string }) => o.orderId === orderId);
+    expect(offer.dropoff.pending).toBe(true); // partner not known yet
     const res = await api().post(`/api/v1/riders/me/requests/${offer.requestId}/accept`).set(auth(riderToken));
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ASSIGNED');
     expect(res.body.pickupRider.id).toBe(riderId);
+  });
+
+  it('the nearest partner is offered the order and accepts', async () => {
+    await new Promise((r) => setTimeout(r, 300));
+    const requests = await api().get('/api/v1/vendors/me/requests').set(auth(vendorToken));
+    expect(requests.status).toBe(200);
+    const offer = requests.body.data.find((o: { orderId: string }) => o.orderId === orderId);
+    expect(offer).toBeTruthy();
+    expect(offer.remainingSeconds).toBeGreaterThan(0);
+
+    const list = await api().get('/api/v1/vendors/me/orders?tab=new').set(auth(vendorToken));
+    expect(list.body.data.some((o: { id: string }) => o.id === orderId)).toBe(true);
+
+    const accept = await api().post(`/api/v1/vendors/me/orders/${orderId}/accept`).set(auth(vendorToken));
+    expect(accept.status).toBe(200);
+    expect(accept.body.isAccepted).toBe(true);
+    expect(accept.body.vendor.id).toBe(vendorId);
+
+    // the rider now has a drop-off address
+    const riderView = await api().get(`/api/v1/riders/me/orders/${orderId}`).set(auth(riderToken));
+    expect(riderView.body.vendor.id).toBe(vendorId);
   });
 
   it('rider confirms pickup with the customer OTP -> PICKED_UP', async () => {

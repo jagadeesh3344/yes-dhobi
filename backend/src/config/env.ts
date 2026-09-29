@@ -37,7 +37,7 @@ const schema = z.object({
   AWS_REGION: z.string().optional(),
 
   /** how long one rider holds a pickup/delivery offer before it passes to the next rider */
-  PICKUP_REQUEST_TTL_SECONDS: z.coerce.number().default(45),
+  PICKUP_REQUEST_TTL_SECONDS: z.coerce.number().default(15),
   /** how long one laundry partner holds an order offer before it passes to the next partner */
   VENDOR_REQUEST_TTL_SECONDS: z.coerce.number().default(90),
   DISPATCH_RADIUS_KM: z.coerce.number().default(8),

@@ -187,7 +187,7 @@ Two order status labels are new to the panel and should be added to its `OrderSt
 customer places order
         |
         v
-RIDER SEARCH (waterfall)  nearest rider gets the offer for 45 s
+RIDER SEARCH (waterfall)  nearest rider gets the offer for 15 s
    declines / no answer -> next nearest rider, immediately
    list exhausted       -> radius doubles once -> then admins are alerted
         |
@@ -214,7 +214,7 @@ partner / rider request payout -> admin processes -> ledger settled
 
 **Why the partner is chosen after the rider:** the clothes cannot move until a rider is found, and partner capacity changes minute to minute. Matching the partner while the rider is already driving to the customer keeps the promise realistic and lets a busy shop pass without delaying the pickup.
 
-Tuning (env / CloudFormation parameters): `PICKUP_REQUEST_TTL_SECONDS` (45), `VENDOR_REQUEST_TTL_SECONDS` (90), `DISPATCH_RADIUS_KM` (8, doubled on the second round), `DISPATCH_MAX_CANDIDATES` (15).
+Tuning (env / CloudFormation parameters): `PICKUP_REQUEST_TTL_SECONDS` (15), `VENDOR_REQUEST_TTL_SECONDS` (90), `DISPATCH_RADIUS_KM` (8, doubled on the second round), `DISPATCH_MAX_CANDIDATES` (15).
 
 Money: `total = subtotal + surcharges (express/Sunday/heavy-load rules) + deliveryFee (free above ₹120) − coupon + tax`. The partner's share (`subtotal × (1 − commission%)`) is recalculated when that partner accepts, because each shop can have its own commission rate. Riders earn `riderBaseFee + perKm × distance` per leg. All tunable in **Admin → Settings** and **Services → Surcharges**.
 

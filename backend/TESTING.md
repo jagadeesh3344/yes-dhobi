@@ -207,7 +207,7 @@ Orders → change that order's status dropdown to *Washing* → toast *Status Up
 | R4 | Rider 5 | `verified: true`; `selfieUrl` opens in browser | |
 | R5 | Rider 6 / 6b | availability toggles; admin Riders shows it | |
 | R6 | Rider 7 | 200; coordinates update in admin | |
-| R7 | Rider 8 (≤ 45 s after an order) | offer with `remainingSeconds`, `payout` | |
+| R7 | Rider 8 (≤ 15 s after an order) | offer with `remainingSeconds`, `payout` | |
 | R8 | Rider 9 | `ASSIGNED`; other riders' offers expire | |
 | R9 | Rider 10 | 200; "Load weighed" event | |
 | R10 | Rider 11 with wrong OTP (edit body to `0000`) | 400 | |
@@ -250,7 +250,7 @@ These are covered by automated tests (`npm test`, file `tests/dispatch-cascade.t
 | W1 | One rider at a time | Place an order, then check *8. Open requests* as each of the three seeded riders | Only the **nearest** rider sees it. The others see nothing | |
 | W2 | Decline passes it on | Nearest rider runs *9b. Decline* | The second-nearest rider sees it within a second, with no admin action | |
 | W3 | Declined offer is dead | The first rider now runs *9. Accept* on the same request id | 409 conflict | |
-| W4 | No answer | Leave the offer untouched for the offer window (45 s by default) | It expires and the next rider gets it automatically | |
+| W4 | No answer | Leave the offer untouched for the offer window (15 s by default) | It expires and the next rider gets it automatically | |
 | W5 | Everyone declines | All riders decline | Admin gets a "Rider needed" notification; `GET /admin/orders/:id/dispatch` shows the cascade as `EXHAUSTED`; admin can restart the search or assign directly | |
 | W6 | Partner comes after the rider | Place an order and check the vendor's *2. Open offers* **before** any rider accepts | Empty — no partner is offered yet, and the order has no `vendor` | |
 | W7 | Partner search starts on acceptance | A rider accepts | Within a second the nearest partner has an offer with a countdown | |

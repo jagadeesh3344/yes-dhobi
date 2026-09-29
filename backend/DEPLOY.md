@@ -253,7 +253,16 @@ cd ~/yesdhobi/yes-dhobi/backend && PARAMS="SmsProvider=sns OtpDevMode=false Seed
 cd ~/yesdhobi/yes-dhobi/backend && PARAMS="SmsProvider=msg91 OtpDevMode=false SeedOnBoot=false SmsSenderId=YESDHB Msg91AuthKey=<auth key> Msg91OtpTemplateId=<template id>" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
 ```
 
-**Option C — Twilio** (only practical for non-Indian numbers / internal testing): `SmsProvider=twilio TwilioAccountSid=… TwilioAuthToken=… TwilioFrom=+1…`.
+**Option C — WhatsApp instead of SMS (no DLT needed)**
+WhatsApp OTP is **not** covered by TRAI's DLT rules — it runs on Meta's platform, so there is no operator registration. You still need a Meta Business account with the business verified, a WhatsApp Business number, a permanent access token and a template of category **AUTHENTICATION** approved by Meta (usually same-day). Then:
+
+```bash
+cd ~/yesdhobi/yes-dhobi/backend && PARAMS="OtpChannel=whatsapp_then_sms OtpDevMode=false SeedOnBoot=false WhatsappPhoneNumberId=<phone number id> WhatsappAccessToken=<permanent token> WhatsappOtpTemplate=<template name>" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
+```
+
+`OtpChannel` values: `sms`, `whatsapp`, or `whatsapp_then_sms` (try WhatsApp first and fall back to SMS if the customer is not on WhatsApp — recommended). Cost is about ₹0.115 + GST per WhatsApp authentication message, similar to SMS.
+
+**Option D — Twilio** (only practical for non-Indian numbers / internal testing): `SmsProvider=twilio TwilioAccountSid=… TwilioAuthToken=… TwilioFrom=+1…`.
 
 **Check it worked:** request an OTP for your own number from the app or with
 `curl -X POST <API>/api/v1/auth/customer/request-otp -H "Content-Type: application/json" -d '{"phone":"<your number>"}'`.
@@ -264,22 +273,56 @@ The response must **not** contain `devOtp` any more, and the SMS should arrive w
 2. SES → **Get set up** → **Request production access**.
 3. Add `MailProvider=ses MailFrom="Yes Dhobi <no-reply@yesdhobi.com>"` to the `PARAMS` in the command above and redeploy.
 
-### 11.3 Your own domain names (https://api.yesdhobi.com, admin.yesdhobi.com, yesdhobi.com)
-1. AWS console → **Certificate Manager** (same region as the backend) → **Request** → public certificate → domain `api.yesdhobi.com` → DNS validation → add the CNAME it shows at your registrar → wait for *Issued* → copy its **ARN** (`arn:aws:acm:<region>:…`).
-2. Change region (top-right) to **US East (N. Virginia)** → Certificate Manager → request one certificate covering `yesdhobi.com`, `www.yesdhobi.com`, `admin.yesdhobi.com` → validate the same way → copy its ARN. (CloudFront only accepts certificates from this region.)
-3. Redeploy:
+### 11.3 Domains and HTTPS — what is already done, what is left
+
+Current state (checked on the live site):
+
+| Address | Status |
+| --- | --- |
+| `https://yesdhobi.com` | ✅ working. Hosted on **Vercel**, which issues and auto-renews a free Let's Encrypt certificate. Nothing to buy, nothing expires. |
+| `https://www.yesdhobi.com` | ❌ **broken** — the certificate covers only `yesdhobi.com`, so visitors typing `www.` get a browser security warning. Fix: Vercel → project → **Settings → Domains → Add** `www.yesdhobi.com` (Vercel issues the certificate and redirects it to the bare domain automatically). 2 minutes. |
+| `https://admin.yesdhobi.com` | ❌ does not exist yet. The admin panel needs a home — add it as a Vercel project and attach this subdomain (free certificate again). |
+| `https://api.yesdhobi.com` | ❌ does not exist yet. See below — this one is needed before the mobile apps ship. |
+
+**About the SSL your domain provider sold you:** you do not need it. Vercel already issues a free certificate for every domain attached to it. A registrar certificate also cannot be used on an AWS load balancer or CloudFront unless you import it into AWS Certificate Manager — and ACM issues equivalent certificates for free, with automatic renewal. So: keep using Vercel's, and use ACM for AWS. No purchase required.
+
+**Why `api.yesdhobi.com` is still needed.** Today the website reaches the API through a Vercel rewrite (`/api/v1/*` → the AWS load balancer), which works for ordinary requests. But:
+* it does **not** pass WebSocket traffic, so live order tracking and the admin panel's real-time updates will not work through it (verified: `/socket.io/` through the website returns the web page, not the API);
+* the mobile apps cannot use it — Google Play and the App Store require the app to call an **HTTPS** endpoint, and the load balancer currently serves plain HTTP.
+
+Setting it up (free, ~30 minutes, mostly DNS waiting):
+1. AWS console → **Certificate Manager**, in the **same region as the backend** (ap-southeast-2 unless you moved to Mumbai) → **Request** → public certificate → domain `api.yesdhobi.com` → DNS validation → add the CNAME record it shows at your domain provider → wait for **Issued** → copy the certificate **ARN**.
+2. Redeploy the API with the certificate so it serves HTTPS:
 
 ```bash
-cd ~/yesdhobi/yes-dhobi/backend && PARAMS="CertificateArn=<backend-region cert ARN> PublicBaseUrl=https://api.yesdhobi.com CorsOrigins=https://admin.yesdhobi.com,https://yesdhobi.com" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
+cd ~/yesdhobi/yes-dhobi/backend && PARAMS="CertificateArn=<certificate ARN> PublicBaseUrl=https://api.yesdhobi.com CorsOrigins=https://yesdhobi.com,https://www.yesdhobi.com,https://admin.yesdhobi.com" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
 ```
+
+3. At your domain provider add a **CNAME**: `api` → the load balancer address (the `yesdhobi-alb-….elb.amazonaws.com` part, without `http://`).
+4. Check `https://api.yesdhobi.com/health` returns `{"status":"ok"}`, then point the admin panel and the mobile apps at `https://api.yesdhobi.com/api/v1`.
+
+### 11.4 Payments — Razorpay
+
+The gateway is fully coded; it only needs your Razorpay account and keys. Until then the API runs a built-in **mock** gateway (cash on delivery and wallet work for real).
+
+1. **Create the account:** sign up at <https://dashboard.razorpay.com>. Complete KYC (PAN, GST if you have one, bank account, business proof). Activation usually takes 1–2 working days.
+2. **Get the keys:** Dashboard → **Account & Settings → API Keys → Generate Key**. You get a **Key ID** (`rzp_live_…`) and a **Key Secret** — the secret is shown once, save it. Use the **Test Mode** keys (`rzp_test_…`) first.
+3. **Create the webhook:** Dashboard → **Account & Settings → Webhooks → Add New Webhook**.
+   * URL: `<API address>/api/v1/payments/webhook` (e.g. `http://yesdhobi-alb-….elb.amazonaws.com/api/v1/payments/webhook`)
+   * Secret: type any strong random string and keep a copy — this is the **Webhook Secret**.
+   * Active events: tick **payment.captured** and **payment.failed**.
+4. **Switch the API to Razorpay:**
+
 ```bash
-cd ~/yesdhobi/yes-dhobi/backend && PARAMS="AdminDomainName=admin.yesdhobi.com WebDomainName=yesdhobi.com CertificateArn=<virginia cert ARN>" AWS_PROFILE=yesdhobi bash infra/deploy-frontends.sh
+cd ~/yesdhobi/yes-dhobi/backend && PARAMS="PaymentProvider=razorpay RazorpayKeyId=<key id> RazorpayKeySecret=<key secret> RazorpayWebhookSecret=<webhook secret>" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
 ```
 
-4. At your domain registrar add CNAME records: `api` → the ALB address (Part 5, without `http://`), `admin` → the admin CloudFront address, `@`/`www` → the website CloudFront address.
+5. **Test with the test keys** before going live: place an order in the app, choose UPI/card, and pay with Razorpay's test details (dashboard → Test Mode → test cards; e.g. card `4111 1111 1111 1111`, any future expiry, CVV `123`). The order's payment status must flip to **Paid** in the admin panel, and the webhook must show a green tick in the Razorpay dashboard.
+6. **Go live:** repeat step 4 with the `rzp_live_…` keys and a webhook created in Live Mode.
 
-### 11.4 Payments
-Online payments (UPI/cards) are a mock until a gateway is connected. Sign up with Razorpay or PhonePe for Business; the developer then wires their keys into `backend/src/modules/payments/payments.routes.ts`. Cash on delivery works today.
+What the backend does for you: creates the Razorpay order, verifies the checkout signature, double-checks the payment with Razorpay's API before marking it paid, listens to the webhook (so a payment still settles if the customer's app crashes mid-payment), and **automatically refunds** a captured payment if the order is later cancelled.
+
+Fees: UPI has 0% MDR by RBI rule but Razorpay charges a ~2% platform fee; cards/netbanking/wallets are 2% + 18% GST. New merchants currently get 0% platform fee for 90 days or ₹5 lakh, whichever comes first.
 
 ---
 

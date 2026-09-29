@@ -1,5 +1,6 @@
 import type { OrderStatus, Prisma } from '@prisma/client';
 import { prisma, type Tx } from '../lib/prisma.js';
+import { logger } from '../lib/logger.js';
 import { conflict, notFound, unprocessable } from '../lib/errors.js';
 import { initials, maskPhone, toTitle } from '../lib/utils.js';
 import { realtime } from '../realtime/socket.js';
@@ -379,6 +380,12 @@ export async function transitionOrder(orderId: string, next: OrderStatus, opts: 
     }
     void settings;
   });
+
+  // refund captured online payments (wallet refunds happen inside the transaction above)
+  if (next === 'CANCELLED') {
+    const { refundOrderPayments } = await import('../modules/payments/payments.routes.js');
+    await refundOrderPayments(orderId, opts.reason ?? 'Order cancelled').catch((err) => logger.error({ err, orderId }, 'refund sweep failed'));
+  }
 
   const o = await broadcastOrder(orderId);
   const msg = CUSTOMER_MESSAGES[next];

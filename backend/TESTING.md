@@ -306,15 +306,15 @@ Order/user:   YD-100012 / 98xxxxxxx
 * **Who can do what:** the admin panel is for staff only — do not give its address to vendors or riders (they get the app).
 * **Where to look when something is wrong:** CloudWatch logs (Part 1 step 7) first; then the bug template above.
 * **Redeploying after a fix:** DEPLOY.md Part 9 — one command each for the API and the websites. Re-run Part 5 quick checks after every redeploy.
-* **Automated tests** run by the developer before every release: `cd backend && npm test` (36 tests) — ask for the "36 passed" line.
+* **Automated tests** run by the developer before every release: `cd backend && npm test` (44 tests) — ask for the "44 passed" line.
 
 ---
 
 ## Part 13 — Next steps after testing passes
 
 1. **Connect the two phone apps to the API** (biggest remaining piece, 1–2 weeks of app development): add an HTTP client + token storage, follow README §3.1–3.3 screen by screen. Rider/Vendor app first (partners onboard), Customer app second. Every request already exists in the Postman collection.
-2. **Real SMS OTPs:** DLT registration with the telecom operator → SNS production access → redeploy with `SmsProvider=sns OtpDevMode=false` (DEPLOY.md 11.1).
-3. **Online payments:** Razorpay / PhonePe for Business merchant account → developer wires the keys into `src/modules/payments/payments.routes.ts`.
+2. **Real OTPs:** either WhatsApp (no DLT paperwork — Meta business verification + an approved template, `OtpChannel=whatsapp_then_sms`) or SMS (DLT registration first). Then `OtpDevMode=false`. DEPLOY.md 11.1.
+3. **Online payments:** Razorpay is already implemented — create the merchant account, add the webhook, then redeploy with `PaymentProvider=razorpay` (DEPLOY.md 11.4). Test with `rzp_test_…` keys first.
 4. **Push notifications:** Firebase project → FCM sending from `src/services/notifications.ts`.
 5. **Domain + HTTPS:** `api.yesdhobi.com`, `admin.yesdhobi.com`, `yesdhobi.com` (DEPLOY.md 11.3). Required before app-store release.
 6. **Email:** SES verified domain → `MailProvider=ses`.

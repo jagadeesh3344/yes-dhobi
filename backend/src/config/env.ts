@@ -31,6 +31,22 @@ const schema = z.object({
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_FROM: z.string().optional(),
+  /** where the login code is delivered: sms, whatsapp, or whatsapp with an SMS fallback */
+  OTP_CHANNEL: z.enum(['sms', 'whatsapp', 'whatsapp_then_sms']).default('sms'),
+  // WhatsApp Cloud API (no DLT needed; needs Meta business verification + an approved AUTHENTICATION template)
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_OTP_TEMPLATE: z.string().optional(),
+  WHATSAPP_TEMPLATE_LANG: z.string().default('en'),
+  WHATSAPP_API_VERSION: z.string().default('v21.0'),
+
+  // ---- Payments ----
+  // mock = built-in fake gateway for testing; razorpay = live gateway
+  PAYMENT_PROVIDER: z.enum(['mock', 'razorpay']).default('mock'),
+  RAZORPAY_KEY_ID: z.string().optional(),
+  RAZORPAY_KEY_SECRET: z.string().optional(),
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+
   // console | ses (AWS SES)
   MAIL_PROVIDER: z.enum(['console', 'ses']).default('console'),
   MAIL_FROM: z.string().default('Yes Dhobi <no-reply@yesdhobi.com>'),

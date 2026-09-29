@@ -95,6 +95,39 @@ Parameters:
   DispatchMaxCandidates:
     Type: String
     Default: '15'
+  OtpChannel:
+    Type: String
+    Default: sms
+    AllowedValues: [sms, whatsapp, whatsapp_then_sms]
+    Description: WhatsApp needs no DLT registration, only a Meta-approved template
+  WhatsappPhoneNumberId:
+    Type: String
+    Default: ''
+  WhatsappAccessToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+  WhatsappOtpTemplate:
+    Type: String
+    Default: ''
+  WhatsappTemplateLang:
+    Type: String
+    Default: en
+  PaymentProvider:
+    Type: String
+    Default: mock
+    AllowedValues: [mock, razorpay]
+  RazorpayKeyId:
+    Type: String
+    Default: ''
+  RazorpayKeySecret:
+    Type: String
+    Default: ''
+    NoEcho: true
+  RazorpayWebhookSecret:
+    Type: String
+    Default: ''
+    NoEcho: true
   MailProvider:
     Type: String
     Default: console
@@ -442,6 +475,15 @@ Resources:
             - { Name: OTP_DEV_MODE, Value: !Ref OtpDevMode }
             - { Name: SMS_PROVIDER, Value: !Ref SmsProvider }
             - { Name: SMS_SENDER_ID, Value: !Ref SmsSenderId }
+            - { Name: OTP_CHANNEL, Value: !Ref OtpChannel }
+            - { Name: WHATSAPP_PHONE_NUMBER_ID, Value: !Ref WhatsappPhoneNumberId }
+            - { Name: WHATSAPP_ACCESS_TOKEN, Value: !Ref WhatsappAccessToken }
+            - { Name: WHATSAPP_OTP_TEMPLATE, Value: !Ref WhatsappOtpTemplate }
+            - { Name: WHATSAPP_TEMPLATE_LANG, Value: !Ref WhatsappTemplateLang }
+            - { Name: PAYMENT_PROVIDER, Value: !Ref PaymentProvider }
+            - { Name: RAZORPAY_KEY_ID, Value: !Ref RazorpayKeyId }
+            - { Name: RAZORPAY_KEY_SECRET, Value: !Ref RazorpayKeySecret }
+            - { Name: RAZORPAY_WEBHOOK_SECRET, Value: !Ref RazorpayWebhookSecret }
             - { Name: PICKUP_REQUEST_TTL_SECONDS, Value: !Ref PickupRequestTtlSeconds }
             - { Name: VENDOR_REQUEST_TTL_SECONDS, Value: !Ref VendorRequestTtlSeconds }
             - { Name: DISPATCH_RADIUS_KM, Value: !Ref DispatchRadiusKm }

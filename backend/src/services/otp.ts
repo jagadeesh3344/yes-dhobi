@@ -2,9 +2,10 @@ import dayjs from 'dayjs';
 import type { OtpPurpose } from '@prisma/client';
 import { env } from '../config/env.js';
 import { prisma } from '../lib/prisma.js';
-import { badRequest, tooMany } from '../lib/errors.js';
+import { badRequest, HttpError, tooMany } from '../lib/errors.js';
 import { randomDigits, sha256 } from '../lib/utils.js';
 import { sms } from './sms.js';
+import { sendWhatsAppOtp, whatsappConfigured } from './whatsapp.js';
 
 const OTP_LENGTH = 4; // the customer app renders a 4-digit OTP field
 const MAX_ATTEMPTS = 5;
@@ -28,18 +29,30 @@ export async function requestOtp(phone: string, purpose: OtpPurpose) {
   await prisma.otpCode.create({ data: { phone, purpose, codeHash: sha256(code), expiresAt } });
 
   // email-keyed codes (admin resets) are delivered by the caller through the mailer
+  let channel: 'sms' | 'whatsapp' | 'none' = 'none';
   if (!phone.startsWith('email:')) {
     const minutes = String(Math.round(env.OTP_TTL_SECONDS / 60));
-    await sms.send(phone, `${code} is your Yes Dhobi verification code. Valid for ${minutes} minutes.`, {
-      templateId: env.SMS_OTP_TEMPLATE_ID ?? env.MSG91_OTP_TEMPLATE_ID,
-      vars: { otp: code, minutes },
-    });
+    const text = `${code} is your Yes Dhobi verification code. Valid for ${minutes} minutes.`;
+    const wantsWhatsApp = env.OTP_CHANNEL === 'whatsapp' || env.OTP_CHANNEL === 'whatsapp_then_sms';
+
+    if (wantsWhatsApp && whatsappConfigured()) {
+      const sent = await sendWhatsAppOtp(phone, code);
+      if (sent.ok) channel = 'whatsapp';
+      else if (env.OTP_CHANNEL === 'whatsapp') throw new HttpError(502, 'OTP_SEND_FAILED', 'Could not send the WhatsApp code. Please try again.');
+    }
+
+    if (channel === 'none') {
+      // sms, or the WhatsApp attempt failed and we are allowed to fall back
+      await sms.send(phone, text, { templateId: env.SMS_OTP_TEMPLATE_ID ?? env.MSG91_OTP_TEMPLATE_ID, vars: { otp: code, minutes } });
+      channel = 'sms';
+    }
   }
 
   return {
     phone,
+    channel,
     expiresInSeconds: env.OTP_TTL_SECONDS,
-    // Only exposed in dev mode so the apps can be exercised without an SMS gateway.
+    // Only exposed in dev mode so the apps can be exercised without a gateway.
     ...(env.OTP_DEV_MODE ? { devOtp: code } : {}),
   };
 }

@@ -33,8 +33,17 @@ export function createApp() {
       credentials: true,
     }),
   );
-  // vendor registration ships base64 documents inline, hence the generous limit
-  app.use(express.json({ limit: '60mb' }));
+  // vendor registration ships base64 documents inline, hence the generous limit.
+  // The raw bytes are kept for the payment webhook, whose signature is computed
+  // over the exact body the gateway sent.
+  app.use(
+    express.json({
+      limit: '60mb',
+      verify: (req, _res, buf) => {
+        if (req.url?.includes('/payments/webhook')) (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      },
+    }),
+  );
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
   if (!isTest) {
     app.use(

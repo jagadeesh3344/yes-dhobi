@@ -18,6 +18,7 @@ import { notificationsRouter } from './modules/notifications/notifications.route
 import { paymentsRouter } from './modules/payments/payments.routes.js';
 import { uploadsRouter } from './modules/uploads/uploads.routes.js';
 import { adminRouter } from './modules/admin/admin.routes.js';
+import { whatsappWebhookRouter } from './modules/webhooks/whatsapp.routes.js';
 import { getSettings } from './services/settings.js';
 import { HttpError } from './lib/errors.js';
 
@@ -69,6 +70,9 @@ export function createApp() {
   // static uploads (local storage driver)
   app.use('/uploads', express.static(path.resolve(process.cwd(), env.UPLOAD_DIR), { maxAge: '7d' }));
 
+  // WhatsApp Meta Cloud API Webhook (accessible directly at root)
+  app.use('/webhook/whatsapp', whatsappWebhookRouter);
+
   const api = express.Router();
   api.use(apiLimiter);
 
@@ -93,6 +97,7 @@ export function createApp() {
   api.use('/payments', paymentsRouter);
   api.use('/uploads', uploadsRouter);
   api.use('/admin', adminRouter);
+  api.use('/webhook/whatsapp', whatsappWebhookRouter);
 
   api.get('/', (_req, res) => {
     res.json({

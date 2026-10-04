@@ -39,6 +39,7 @@ const schema = z.object({
   WHATSAPP_OTP_TEMPLATE: z.string().optional(),
   WHATSAPP_TEMPLATE_LANG: z.string().default('en'),
   WHATSAPP_API_VERSION: z.string().default('v21.0'),
+  WHATSAPP_VERIFY_TOKEN: z.string().default('yesdhobi_whatsapp_2026'),
 
   // ---- Payments ----
   // mock = built-in fake gateway for testing; razorpay = live gateway
@@ -51,6 +52,7 @@ const schema = z.object({
   MAIL_PROVIDER: z.enum(['console', 'ses']).default('console'),
   MAIL_FROM: z.string().default('Yes Dhobi <no-reply@yesdhobi.com>'),
   AWS_REGION: z.string().optional(),
+  AWS_LOCATION_API_KEY: z.string().optional(),
 
   /** how long one rider holds a pickup/delivery offer before it passes to the next rider */
   PICKUP_REQUEST_TTL_SECONDS: z.coerce.number().default(15),

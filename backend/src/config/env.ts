@@ -62,6 +62,11 @@ const schema = z.object({
   /** how many candidates are queued per cascade round */
   DISPATCH_MAX_CANDIDATES: z.coerce.number().default(15),
 
+  /** requests per minute per IP across the API */
+  RATE_LIMIT_PER_MINUTE: z.coerce.number().default(300),
+  /** login / OTP attempts per 10 minutes per IP (a whole office shares one IP) */
+  AUTH_RATE_LIMIT_PER_10MIN: z.coerce.number().default(60),
+
   UPLOAD_DIR: z.string().default('uploads'),
   MAX_UPLOAD_MB: z.coerce.number().default(8),
 

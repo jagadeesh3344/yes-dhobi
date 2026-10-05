@@ -727,7 +727,7 @@ export async function cancelDispatches(orderId: string) {
 }
 
 let sweeper: NodeJS.Timeout | null = null;
-export function startDispatchSweeper(intervalMs = 5_000) {
+export function startDispatchSweeper(intervalMs = 3_000) {
   if (sweeper) return;
   sweeper = setInterval(() => {
     sweepDispatches().catch((err) => logger.error({ err }, 'dispatch sweeper failed'));

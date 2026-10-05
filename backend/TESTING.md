@@ -306,6 +306,7 @@ Order/user:   YD-100012 / 98xxxxxxx
 * **Who can do what:** the admin panel is for staff only — do not give its address to vendors or riders (they get the app).
 * **Where to look when something is wrong:** CloudWatch logs (Part 1 step 7) first; then the bug template above.
 * **Redeploying after a fix:** DEPLOY.md Part 9 — one command each for the API and the websites. Re-run Part 5 quick checks after every redeploy.
+* **Login attempts are limited** to 60 per 10 minutes per internet connection. A whole office shares one connection, so if several people log in and out repeatedly you may see "Too many attempts. Try again in a few minutes." Wait 10 minutes, or ask the developer to raise `AuthRateLimitPer10Min` during the test week. Requesting an OTP for the *same phone number* is separately limited to 3 per 10 minutes - that one is deliberate and protects against SMS charges.
 * **Automated tests** run by the developer before every release: `cd backend && npm test` (44 tests) — ask for the "44 passed" line.
 
 ---

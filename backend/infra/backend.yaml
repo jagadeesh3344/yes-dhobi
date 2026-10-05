@@ -128,6 +128,13 @@ Parameters:
     Type: String
     Default: ''
     NoEcho: true
+  RateLimitPerMinute:
+    Type: String
+    Default: '300'
+  AuthRateLimitPer10Min:
+    Type: String
+    Default: '60'
+    Description: Login/OTP attempts per 10 min per IP; raise while a team tests from one office IP
   MailProvider:
     Type: String
     Default: console
@@ -488,6 +495,8 @@ Resources:
             - { Name: VENDOR_REQUEST_TTL_SECONDS, Value: !Ref VendorRequestTtlSeconds }
             - { Name: DISPATCH_RADIUS_KM, Value: !Ref DispatchRadiusKm }
             - { Name: DISPATCH_MAX_CANDIDATES, Value: !Ref DispatchMaxCandidates }
+            - { Name: RATE_LIMIT_PER_MINUTE, Value: !Ref RateLimitPerMinute }
+            - { Name: AUTH_RATE_LIMIT_PER_10MIN, Value: !Ref AuthRateLimitPer10Min }
             - { Name: SMS_DLT_ENTITY_ID, Value: !Ref SmsDltEntityId }
             - { Name: SMS_OTP_TEMPLATE_ID, Value: !Ref SmsOtpTemplateId }
             - { Name: MSG91_AUTH_KEY, Value: !Ref Msg91AuthKey }

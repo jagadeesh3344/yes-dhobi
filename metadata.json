@@ -1,5 +1,5 @@
 {
-  "name": "Yes Dhobi Partner",
+  "name": "Yes Dhobi",
   "description": "Vendor registration and onboarding platform for laundry partners across India",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

@@ -41,7 +41,9 @@ export const Footer: React.FC<FooterProps> = ({ onStartRegistration }) => {
           {/* Brand & Subtext */}
           <div className="lg:col-span-8 space-y-4">
             <div className="flex items-center">
-              <YesDhobiLogo variant="white" className="h-8 sm:h-9 w-auto" />
+              <div className="bg-white px-3 py-1.5 rounded-xl inline-flex items-center shadow-xs">
+                <YesDhobiLogo className="h-7 sm:h-8 w-auto" />
+              </div>
             </div>
             <p className="text-slate-400 text-xs sm:text-sm leading-relaxed max-w-lg">
               Connecting storefronts directly with thousands of household customers across your neighborhood daily.

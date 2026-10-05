@@ -19,8 +19,7 @@ export default defineConfig(() => {
       allowedHosts: true as const,
       proxy: {
         '/api/v1/vendors': {
-          // local fallback proxy; production builds call VITE_API_URL directly
-          target: process.env.VITE_API_ORIGIN ?? 'http://localhost:4000',
+          target: 'https://yesdhobi-api.onrender.com',
           changeOrigin: true,
           secure: false,
         },

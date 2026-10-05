@@ -61,7 +61,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
           {/* Left Column Content */}
           <div className="lg:col-span-7 space-y-6">
             <div className="inline-flex items-center gap-2 bg-[#1E293B] border border-slate-700/80 px-4 py-1.5 rounded-full shadow-inner">
-              <span className="text-yellow-400 font-bold text-xs tracking-wide">#1 Platform for Indian Laundry Services</span>
+              <span className="text-yellow-400 font-bold text-xs tracking-wide">#1st indian quick laundry service</span>
             </div>
 
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-[1.1]">

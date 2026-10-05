@@ -96,7 +96,3 @@ npm run lint
 ## License & Copyright
 
 © 2026. All rights reserved by Yesdhobi.com
-
-## Backend & deployment
-
-The API for all Yes Dhobi apps lives in [`backend/`](backend/README.md). To put everything live on AWS, follow the step-by-step guide in [`backend/DEPLOY.md`](backend/DEPLOY.md) (no AWS experience needed), then test it with [`backend/TESTING.md`](backend/TESTING.md).

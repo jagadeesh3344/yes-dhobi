@@ -11,6 +11,7 @@ import { Step5DocumentsVerification } from './components/steps/Step5DocumentsVer
 import { SuccessScreen } from './components/steps/SuccessScreen';
 import { LandingPage } from './components/LandingPage';
 import { Footer } from './components/Footer';
+import { EntryAnimation } from './components/EntryAnimation';
 
 export function App() {
   const {
@@ -36,11 +37,17 @@ export function App() {
   };
 
   if (viewMode === 'landing') {
-    return <LandingPage onStartRegistration={handleStartRegistration} />;
+    return (
+      <>
+        <EntryAnimation />
+        <LandingPage onStartRegistration={handleStartRegistration} />
+      </>
+    );
   }
 
   return (
     <div className="w-full min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-900">
+      <EntryAnimation />
       {/* App Header */}
       <Header
         currentStep={currentStep}

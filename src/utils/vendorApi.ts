@@ -1,7 +1,7 @@
 import { RegistrationFormData, ServiceItem } from '../types';
 
-export const PRIMARY_API_ENDPOINT = 'https://yesdhobi-api.onrender.com/api/v1/vendors';
-export const PROXY_API_ENDPOINT = '/api/v1/vendors';
+export const PRIMARY_API_ENDPOINT = '/api/v1/vendors';
+export const DIRECT_ALB_ENDPOINT = 'http://yesdhobi-alb-648458477.ap-southeast-2.elb.amazonaws.com/api/v1/vendors';
 
 const SERVICE_ID_MAP: Record<string, number> = {
   wash_fold: 1,
@@ -288,17 +288,17 @@ export async function submitVendorRegistration(formData: RegistrationFormData) {
       // JSON parse error
     }
 
-    // Try fallback proxy if direct URL returned 4xx or 5xx
-    return await submitToProxyEndpoint(payload, errorMsg);
+    // Try fallback direct ALB endpoint if relative URL failed
+    return await submitToFallbackEndpoint(payload, errorMsg);
   } catch (err: any) {
-    console.warn('Direct fetch failed, trying proxy endpoint:', err);
-    return await submitToProxyEndpoint(payload, err?.message || 'Network error');
+    console.warn('Primary fetch failed, trying fallback ALB endpoint:', err);
+    return await submitToFallbackEndpoint(payload, err?.message || 'Network error');
   }
 }
 
-async function submitToProxyEndpoint(payload: ReturnType<typeof transformFormDataToApiPayload>, originalError: string) {
+async function submitToFallbackEndpoint(payload: ReturnType<typeof transformFormDataToApiPayload>, originalError: string) {
   try {
-    const response = await fetch(PROXY_API_ENDPOINT, {
+    const response = await fetch(DIRECT_ALB_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -320,7 +320,7 @@ async function submitToProxyEndpoint(payload: ReturnType<typeof transformFormDat
       // JSON parse error
     }
     throw new Error(errorMsg);
-  } catch (proxyErr: any) {
-    throw new Error(`Failed to submit registration: ${originalError || proxyErr?.message || 'Unknown error'}`);
+  } catch (fallbackErr: any) {
+    throw new Error(`Failed to submit registration: ${originalError || fallbackErr?.message || 'Unknown error'}`);
   }
 }

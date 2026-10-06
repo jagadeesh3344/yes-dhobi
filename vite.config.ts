@@ -18,8 +18,8 @@ export default defineConfig(() => {
       port: 3000,
       allowedHosts: true as const,
       proxy: {
-        '/api/v1/vendors': {
-          target: 'https://yesdhobi-api.onrender.com',
+        '/api/v1': {
+          target: 'http://yesdhobi-alb-648458477.ap-southeast-2.elb.amazonaws.com',
           changeOrigin: true,
           secure: false,
         },

@@ -39,6 +39,31 @@ export function sha256(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+/**
+ * A temporary password we show to a partner once, e.g. `X7kP@92Lm`. Mixed case,
+ * a digit and a symbol so it survives any password policy; 0/O/1/l/I are left
+ * out because the partner reads this off a screen and types it on a phone.
+ */
+export function randomPassword(length = 10): string {
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const digits = '23456789';
+  const symbols = '@#$%&*!?';
+  const all = lower + upper + digits + symbols;
+  // guarantee one of each class, then fill, then shuffle
+  const picks = [pickOne(lower), pickOne(upper), pickOne(digits), pickOne(symbols)];
+  while (picks.length < length) picks.push(pickOne(all));
+  for (let i = picks.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [picks[i], picks[j]] = [picks[j]!, picks[i]!];
+  }
+  return picks.join('');
+}
+
+function pickOne(chars: string): string {
+  return chars[crypto.randomInt(chars.length)]!;
+}
+
 export function randomToken(bytes = 48): string {
   return crypto.randomBytes(bytes).toString('base64url');
 }

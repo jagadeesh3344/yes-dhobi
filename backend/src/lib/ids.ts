@@ -9,6 +9,7 @@ const SEQUENCES: Record<string, { seq: string; start: number }> = {
   YD: { seq: 'order_number_seq', start: 100001 },
   PAY: { seq: 'payout_number_seq', start: 10001 },
   TKT: { seq: 'ticket_number_seq', start: 1001 },
+  VD: { seq: 'vendor_registration_seq', start: 100001 },
 };
 
 let ensured = false;
@@ -25,4 +26,13 @@ export async function nextId(prefix: keyof typeof SEQUENCES, client: Tx | typeof
   const { seq } = SEQUENCES[prefix]!;
   const rows = await client.$queryRawUnsafe<{ nextval: bigint }[]>(`SELECT nextval('${seq}')`);
   return `${prefix}-${rows[0]!.nextval.toString()}`;
+}
+
+/**
+ * The partner's login id, e.g. VD100001 - no separator, because the partner
+ * types it into the app. Backed by the same kind of Postgres sequence, so it is
+ * unique even if two shops register at the same instant.
+ */
+export async function nextRegistrationId(client: Tx | typeof prisma = prisma): Promise<string> {
+  return (await nextId('VD', client)).replace('-', '');
 }

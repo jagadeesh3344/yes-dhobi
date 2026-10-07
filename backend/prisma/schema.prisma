@@ -260,6 +260,8 @@ enum VendorStatus {
 
 model Vendor {
   id                         String       @id @default(cuid())
+  /// Human-readable login id shown to the partner after onboarding, e.g. VD100001
+  registrationId             String?      @unique
   userId                     String       @unique
   shopName                   String
   ownerName                  String

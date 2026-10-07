@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import { z } from 'zod';
 import type { Prisma, RiderVehicle } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
+import { nextRegistrationId } from '../../lib/ids.js';
 import { asyncHandler, paginated, parseBody, parsePagination, parseQuery } from '../../lib/http.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { compact, normalizePhone, randomDigits, referralCode } from '../../lib/utils.js';
@@ -341,6 +342,7 @@ adminPeopleRouter.post(
         passwordHash: await bcrypt.hash(password, 10),
         vendor: {
           create: {
+            registrationId: await nextRegistrationId(),
             shopName: body.name,
             ownerName: body.owner,
             shopAddress: body.location,
@@ -424,7 +426,16 @@ adminPeopleRouter.patch(
     });
     if (vendorStatus === 'SUSPENDED' || body.accountStatus === 'SUSPENDED') await revokeAllUserTokens(v.userId);
     if (vendorStatus && vendorStatus !== v.status) {
-      await notifyUser(v.userId, { title: `Shop status: ${vendorStatus.replace('_', ' ').toLowerCase()}`, message: vendorStatus === 'ACTIVE' ? 'Your shop is live and can receive orders.' : 'Your shop status was updated by the Yes Dhobi team.', type: 'VENDOR' });
+      await notifyUser(v.userId, {
+        title: `Shop status: ${vendorStatus.replace('_', ' ').toLowerCase()}`,
+        message:
+          vendorStatus === 'ACTIVE'
+            ? `Your shop is live and can receive orders. Sign in to the partner app with Registration ID ${v.registrationId ?? 'provided at onboarding'}.`
+            : vendorStatus === 'REJECTED'
+              ? 'Your partner application was not approved. Your login has been disabled - please contact support.'
+              : 'Your shop status was updated by the Yes Dhobi team.',
+        type: 'VENDOR',
+      });
     }
     const rev = await vendorRevenue([v.id]);
     res.json(serializeVendor((await prisma.vendor.findUnique({ where: { id: v.id }, include: vendorInclude }))!, rev(v.id)));

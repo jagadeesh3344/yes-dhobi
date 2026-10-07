@@ -171,7 +171,13 @@ async function rankVendors(
           : null;
       const sameCity = Boolean(order.city && v.city.toLowerCase() === order.city.toLowerCase());
       const load = v._count.orders / Math.max(1, v.dailyCapacityKg / 5);
-      return { id: v.id, distance, sameCity, score: (distance ?? (sameCity ? 5 : 500)) + load * 2 };
+      // A shop with no map pin can still be used - we fall back to the city -
+      // but it must rank behind every shop we can actually measure. The penalty
+      // is deliberately far larger than any real distance plus load, because a
+      // flat score here used to let an unpinned shop outrank a nearby one as
+      // soon as that nearby shop picked up a few open orders.
+      const UNPINNED = 10_000;
+      return { id: v.id, distance, sameCity, score: distance == null ? UNPINNED + load * 2 : distance + load * 2 };
     })
     .filter((v) => (v.distance == null ? v.sameCity : v.distance <= radiusKm))
     .sort((a, b) => a.score - b.score)

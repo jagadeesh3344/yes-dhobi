@@ -2,7 +2,8 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { conflict, unprocessable } from '../../lib/errors.js';
-import { normalizePhone, randomDigits } from '../../lib/utils.js';
+import { normalizePhone, randomPassword } from '../../lib/utils.js';
+import { nextRegistrationId } from '../../lib/ids.js';
 import { materializeDocuments } from '../../services/storage.js';
 import { notifyAdmins } from '../../services/notifications.js';
 import { sms } from '../../services/sms.js';
@@ -101,8 +102,12 @@ export async function registerVendor(input: VendorRegistration) {
   const zoneIds = (await prisma.zone.findMany({ where: { id: { in: input.serviceAreas } }, select: { id: true } })).map((z) => z.id);
   const equipmentIds = new Set((await prisma.equipment.findMany({ select: { id: true } })).map((e) => e.id));
 
-  // temporary password so the vendor can log in immediately; sent by SMS. They can reset via OTP any time.
-  const tempPassword = input.password ?? randomDigits(6);
+  // The partner gets a Registration ID and, unless they chose their own
+  // password, a generated temporary one. Both are shown once on the submission
+  // screen and texted to them; only the hash is stored. Neither unlocks the app
+  // until an admin approves the application.
+  const registrationId = await nextRegistrationId();
+  const tempPassword = input.password ?? randomPassword();
   const settings = await getSettings();
 
   const vendor = await prisma.$transaction(async (tx) => {
@@ -119,6 +124,7 @@ export async function registerVendor(input: VendorRegistration) {
     const v = await tx.vendor.create({
       data: {
         userId: user.id,
+        registrationId,
         shopName: input.businessDetails.shopName,
         ownerName: input.personalDetails.fullName,
         whatsappNumber: input.personalDetails.whatsappNumber ?? undefined,
@@ -208,15 +214,19 @@ export async function registerVendor(input: VendorRegistration) {
   await sms.send(
     phone,
     input.password
-      ? `Welcome to Yes Dhobi Partners! Your application for ${input.businessDetails.shopName} is under review.`
-      : `Welcome to Yes Dhobi Partners! Your application for ${input.businessDetails.shopName} is under review. Partner app login: ${phone.replace('+91', '')} / temporary password ${tempPassword}`,
+      ? `Yes Dhobi Partners: application received for ${input.businessDetails.shopName}. Your Registration ID is ${registrationId}. You can log in once our team approves it.`
+      : `Yes Dhobi Partners: application received for ${input.businessDetails.shopName}. Registration ID ${registrationId}, temporary password ${tempPassword}. These work once our team approves your application.`,
   );
 
   return {
-    registrationId: vendor.id,
+    registrationId,
+    // shown once on the confirmation screen; only the hash is kept. Omitted when
+    // the partner chose their own password during onboarding.
+    ...(input.password ? {} : { temporaryPassword: tempPassword }),
     vendorId: vendor.id,
     id: vendor.id,
     status: 'PENDING_VERIFICATION',
-    message: 'Registration received. Our team will verify your documents within 48 hours.',
+    credentialsActive: false,
+    message: `Registration received. Your Registration ID is ${registrationId}. Our team will verify your documents within 48 hours - you can sign in to the partner app once your application is approved.`,
   };
 }

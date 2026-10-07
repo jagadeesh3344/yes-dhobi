@@ -98,6 +98,31 @@ export async function loadOrder(idOrNumber: string, client: Tx | typeof prisma =
 
 type Viewer = 'customer' | 'rider' | 'vendor' | 'admin';
 
+/** The happy path, in order. CANCELLED sits outside it. */
+const PROGRESSION: OrderStatus[] = [
+  'PENDING_PICKUP',
+  'ASSIGNED',
+  'PICKED_UP',
+  'IN_LAUNDRY',
+  'WASHING',
+  'IRONING',
+  'QUALITY_CHECK',
+  'READY',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+];
+
+/**
+ * Has the order already got to `target` (or past it)? Used to make the OTP
+ * handoffs idempotent: a rider who double-taps, or retries after a slow
+ * response, should be told "done" rather than "wrong state", which is what left
+ * the app asking for the same OTP twice and then out of step for good.
+ */
+export function hasReached(status: OrderStatus, target: OrderStatus): boolean {
+  if (status === 'CANCELLED') return false;
+  return PROGRESSION.indexOf(status) >= PROGRESSION.indexOf(target);
+}
+
 /**
  * The customer may cancel only until a rider has been allocated. Once a rider
  * is on the way the app hides the button and support has to step in, so the
@@ -270,14 +295,35 @@ export async function addEvent(
 }
 
 /** Push the latest order snapshot to everyone interested. */
+/**
+ * Push an order update to everyone who should see it - exactly once each, and
+ * shaped for that audience.
+ *
+ * It deliberately does NOT broadcast to the `order:{id}` room. Every party is
+ * already in their own `user:{id}` room, so a room broadcast delivered a second
+ * copy to anyone watching an order (the customer on the tracking screen got
+ * every update twice). Worse, the room copy was the *customer* payload, which
+ * carries `otps.pickup` and `otps.delivery` - so the rider and the shop, who
+ * are also in that room, were handed the very OTPs they are supposed to collect
+ * from the customer. The four-OTP handoff only works if the party that enters a
+ * code cannot read it.
+ *
+ * The `order:{id}` room still carries the role-neutral traffic: `rider:location`,
+ * `rider:arrived` and `chat:message`.
+ */
 export async function broadcastOrder(orderId: string) {
   const o = await loadOrder(orderId);
-  realtime.toOrder(o.id, 'order:updated', serializeOrder(o, 'customer'));
-  realtime.toUser(o.customer.userId, 'order:updated', serializeOrder(o, 'customer'));
-  if (o.vendor) realtime.toUser(o.vendor.userId, 'order:updated', serializeOrder(o, 'vendor'));
-  if (o.pickupRider) realtime.toUser(o.pickupRider.userId, 'order:updated', serializeOrder(o, 'rider'));
-  if (o.deliveryRider && o.deliveryRider.userId !== o.pickupRider?.userId)
-    realtime.toUser(o.deliveryRider.userId, 'order:updated', serializeOrder(o, 'rider'));
+  const sent = new Set<string>();
+  const once = (userId: string | undefined, viewer: Viewer) => {
+    if (!userId || sent.has(userId)) return;
+    sent.add(userId);
+    realtime.toUser(userId, 'order:updated', serializeOrder(o, viewer));
+  };
+
+  once(o.customer.userId, 'customer');
+  once(o.vendor?.userId, 'vendor');
+  once(o.pickupRider?.userId, 'rider');
+  once(o.deliveryRider?.userId, 'rider');
   realtime.toAdmins('order:updated', serializeOrder(o, 'admin'));
   return o;
 }

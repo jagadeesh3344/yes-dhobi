@@ -55,9 +55,15 @@ adminOpsRouter.post(
       if (v.riderId) await tx.rider.update({ where: { id: v.riderId }, data: { onboardingStatus: 'APPROVED' } });
       await tx.user.update({ where: { id: v.userId }, data: { status: 'ACTIVE' } });
     });
+    // a partner's Registration ID and password only start working now, so the
+     // notice has to tell them what to sign in with
+    const approvedVendor = v.vendorId ? await prisma.vendor.findUnique({ where: { id: v.vendorId }, select: { registrationId: true } }) : null;
     await notifyUser(v.userId, {
       title: 'Verification approved',
-      message: v.type === 'VENDOR' ? 'Your shop is verified and live on Yes Dhobi. You can start accepting orders.' : 'You are verified! Go online to start receiving pickup requests.',
+      message:
+        v.type === 'VENDOR'
+          ? `Your shop is verified and live on Yes Dhobi. Sign in to the partner app with Registration ID ${approvedVendor?.registrationId ?? 'provided at onboarding'} and the password from your onboarding confirmation.`
+          : 'You are verified! Go online to start receiving pickup requests.',
       type: 'SYSTEM',
     });
     res.json(serializeVerification((await prisma.verification.findUnique({ where: { id: v.id }, include: verificationInclude }))!));
@@ -76,7 +82,14 @@ adminOpsRouter.post(
       if (v.vendorId) await tx.vendor.update({ where: { id: v.vendorId }, data: { status: 'REJECTED' } });
       if (v.riderId) await tx.rider.update({ where: { id: v.riderId }, data: { onboardingStatus: 'REJECTED' } });
     });
-    await notifyUser(v.userId, { title: 'Verification rejected', message: `Reason: ${reason}. Please re-submit your documents.`, type: 'SYSTEM' });
+    await notifyUser(v.userId, {
+      title: 'Verification rejected',
+      message:
+        v.type === 'VENDOR'
+          ? `Reason: ${reason}. Your partner login stays disabled until a new application is approved.`
+          : `Reason: ${reason}. Please re-submit your documents after 24 hours.`,
+      type: 'SYSTEM',
+    });
     res.json(serializeVerification((await prisma.verification.findUnique({ where: { id: v.id }, include: verificationInclude }))!));
   }),
 );

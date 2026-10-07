@@ -9,7 +9,7 @@ import { compact, maskAccount, toTitle } from '../../lib/utils.js';
 import { requireRider } from '../../middleware/auth.js';
 import { materializeDocuments } from '../../services/storage.js';
 import { notifyAdmins, notifyUser } from '../../services/notifications.js';
-import { addEvent, broadcastOrder, loadOrder, orderInclude, serializeOrder, transitionOrder } from '../../services/orders.js';
+import { addEvent, broadcastOrder, hasReached, loadOrder, orderInclude, serializeOrder, transitionOrder } from '../../services/orders.js';
 import { acceptRequest, declineRequest, serializeRequest } from '../../services/dispatch.js';
 import { earningsSummary, partyBalance } from '../../services/ledger.js';
 import { realtime } from '../../realtime/socket.js';
@@ -452,8 +452,13 @@ ridersRouter.post(
     const { otp } = parseBody(otpBody, req.body);
     const order = await riderOrder(req.params.id!, req.user!.riderId!);
     if (order.pickupRiderId !== req.user!.riderId) throw forbidden('You are not the pickup rider for this order');
-    if (order.status !== 'ASSIGNED') throw unprocessable(`Order is ${order.status}, expected ASSIGNED`);
     if (otp !== order.customerPickupOtp) throw badRequest('Incorrect pickup OTP');
+    // a second tap on the same button is a no-op, not an error
+    if (hasReached(order.status, 'PICKED_UP')) {
+      res.json({ ...serializeOrder(order, 'rider'), alreadyConfirmed: true });
+      return;
+    }
+    if (order.status !== 'ASSIGNED') throw unprocessable(`Order is ${order.status}, expected ASSIGNED`);
     const updated = await transitionOrder(order.id, 'PICKED_UP', { actorUserId: req.user!.id, description: 'Rider collected clothes from customer' });
     res.json(serializeOrder(updated, 'rider'));
   }),
@@ -466,11 +471,15 @@ ridersRouter.post(
     const { otp } = parseBody(otpBody, req.body);
     const order = await riderOrder(req.params.id!, req.user!.riderId!);
     if (order.pickupRiderId !== req.user!.riderId) throw forbidden('You are not the pickup rider for this order');
+    if (otp !== order.vendorDropOtp) throw badRequest('Incorrect vendor OTP');
+    if (hasReached(order.status, 'IN_LAUNDRY')) {
+      res.json({ ...serializeOrder(order, 'rider'), alreadyConfirmed: true });
+      return;
+    }
     if (order.status !== 'PICKED_UP') throw unprocessable(`Order is ${order.status}, expected PICKED_UP`);
     // the partner search runs while the rider is collecting; it is normally done
     // well before this point, but guard in case no partner has accepted yet
     if (!order.vendorId) throw unprocessable('The laundry partner is still being confirmed. You will get the drop-off address in a moment.');
-    if (otp !== order.vendorDropOtp) throw badRequest('Incorrect vendor OTP');
     const updated = await transitionOrder(order.id, 'IN_LAUNDRY', { actorUserId: req.user!.id, description: `Dropped at ${order.vendor?.shopName ?? 'laundry partner'}` });
     res.json(serializeOrder(updated, 'rider'));
   }),
@@ -483,8 +492,12 @@ ridersRouter.post(
     const { otp } = parseBody(otpBody, req.body);
     const order = await riderOrder(req.params.id!, req.user!.riderId!);
     if (order.deliveryRiderId !== req.user!.riderId) throw forbidden('You are not the delivery rider for this order');
-    if (order.status !== 'READY') throw unprocessable(`Order is ${order.status}, expected READY`);
     if (otp !== order.vendorHandoverOtp) throw badRequest('Incorrect handover OTP');
+    if (hasReached(order.status, 'OUT_FOR_DELIVERY')) {
+      res.json({ ...serializeOrder(order, 'rider'), alreadyConfirmed: true });
+      return;
+    }
+    if (order.status !== 'READY') throw unprocessable(`Order is ${order.status}, expected READY`);
     const updated = await transitionOrder(order.id, 'OUT_FOR_DELIVERY', { actorUserId: req.user!.id, description: 'Rider collected order from laundry partner' });
     res.json(serializeOrder(updated, 'rider'));
   }),
@@ -497,8 +510,12 @@ ridersRouter.post(
     const { otp, collectedCash } = parseBody(otpBody.extend({ collectedCash: z.boolean().optional() }), req.body);
     const order = await riderOrder(req.params.id!, req.user!.riderId!);
     if (order.deliveryRiderId !== req.user!.riderId) throw forbidden('You are not the delivery rider for this order');
-    if (order.status !== 'OUT_FOR_DELIVERY') throw unprocessable(`Order is ${order.status}, expected OUT_FOR_DELIVERY`);
     if (otp !== order.customerDeliveryOtp) throw badRequest('Incorrect delivery OTP');
+    if (hasReached(order.status, 'DELIVERED')) {
+      res.json({ ...serializeOrder(order, 'rider'), alreadyConfirmed: true });
+      return;
+    }
+    if (order.status !== 'OUT_FOR_DELIVERY') throw unprocessable(`Order is ${order.status}, expected OUT_FOR_DELIVERY`);
     if (order.paymentMethod === 'COD' && collectedCash === false) throw unprocessable('Collect cash before completing a COD delivery');
     const updated = await transitionOrder(order.id, 'DELIVERED', { actorUserId: req.user!.id, description: 'Delivered to customer' });
     res.json(serializeOrder(updated, 'rider'));

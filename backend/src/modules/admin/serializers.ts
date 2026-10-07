@@ -88,6 +88,8 @@ export function serializeVendor(v: Prisma.VendorGetPayload<{ include: typeof ven
   return {
     id: v.id,
     userId: v.userId,
+    /** the id the partner logs in with, e.g. VD100001 */
+    registrationId: v.registrationId,
     name: v.shopName,
     owner: v.ownerName,
     phone: v.user.phone,

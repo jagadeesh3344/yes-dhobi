@@ -227,24 +227,49 @@ authRouter.post(
 // Rider & Vendor: phone + password
 // ---------------------------------------------------------------------------
 
-async function passwordLogin(role: Role, phoneInput: string, password: string) {
-  const phone = normalizePhone(phoneInput);
-  const user = await prisma.user.findUnique({
-    where: { phone_role: { phone, role } },
-    include: { rider: true, vendor: true },
-  });
-  if (!user || !user.passwordHash) throw unauthorized('No account found for this mobile number');
-  let ok = await bcrypt.compare(password, user.passwordHash);
-  if (!ok && (await bcrypt.compare('Partner@123', user.passwordHash))) {
-    // User was onboarded with fallback password; update password hash to the user's entered password
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash: await bcrypt.hash(password, 10) },
-    });
-    ok = true;
-  }
-  if (!ok) throw unauthorized('Incorrect password. Please verify and try again.');
+/** Partner Registration IDs look like VD100001. */
+const REGISTRATION_ID = /^VD\d{4,}$/i;
+
+/**
+ * Password sign-in for riders and partners. Partners may identify themselves
+ * with either their mobile number or the Registration ID issued at onboarding.
+ *
+ * A partner's credentials only work once an admin has approved the application:
+ * that is the whole point of handing them out at submission time. Riders can
+ * still sign in while under review, because their app has to show them the
+ * review/rejection screen; what they cannot do is go online or take orders
+ * (see `assertApproved` in the rider routes).
+ */
+async function passwordLogin(role: Role, identifier: string, password: string) {
+  const asRegistrationId = role === 'VENDOR' && REGISTRATION_ID.test(identifier.trim());
+  const user = asRegistrationId
+    ? (
+        await prisma.vendor.findUnique({
+          where: { registrationId: identifier.trim().toUpperCase() },
+          select: { user: { include: { rider: true, vendor: true } } },
+        })
+      )?.user ?? null
+    : await prisma.user.findUnique({
+        where: { phone_role: { phone: normalizePhone(identifier), role } },
+        include: { rider: true, vendor: true },
+      });
+
+  const notFoundMessage = asRegistrationId ? 'No account found for this Registration ID' : 'No account found for this mobile number';
+  if (!user || !user.passwordHash) throw unauthorized(notFoundMessage);
+  if (!(await bcrypt.compare(password, user.passwordHash))) throw unauthorized('Incorrect password. Please verify and try again.');
   if (user.status === 'SUSPENDED') throw forbidden('Your account has been suspended. Contact support.');
+
+  if (role === 'VENDOR' && user.vendor) {
+    const v = user.vendor;
+    if (v.status === 'PENDING_VERIFICATION') {
+      throw forbidden(
+        `Your application (${v.registrationId ?? 'pending'}) is still being verified. You can sign in once our team approves it.`,
+      );
+    }
+    if (v.status === 'REJECTED') throw forbidden('Your partner application was not approved. Please contact support.');
+    if (v.status === 'SUSPENDED') throw forbidden('Your shop has been suspended. Contact support.');
+  }
+
   const tokens = await issueTokens(user);
   return { ...tokens, user: publicUser(user), rider: user.rider ?? undefined, vendor: user.vendor ?? undefined };
 }
@@ -260,12 +285,23 @@ authRouter.post(
   }),
 );
 
+/** Partners sign in with their Registration ID (VD100001) or their mobile number. */
+const vendorLoginSchema = z
+  .object({
+    registrationId: z.string().trim().min(3).max(32).optional(),
+    phone: z.string().trim().min(3).max(20).optional(),
+    password: z.string().min(1),
+  })
+  .refine((v) => Boolean(v.registrationId) !== Boolean(v.phone), {
+    message: 'Provide either your Registration ID or your mobile number',
+  });
+
 authRouter.post(
   '/vendor/login',
   authLimiter,
   asyncHandler(async (req, res) => {
-    const { phone, password } = parseBody(loginSchema, req.body);
-    res.json(await passwordLogin('VENDOR', phone, password));
+    const body = parseBody(vendorLoginSchema, req.body);
+    res.json(await passwordLogin('VENDOR', body.registrationId ?? body.phone!, body.password));
   }),
 );
 

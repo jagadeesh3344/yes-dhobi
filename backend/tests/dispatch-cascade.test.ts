@@ -58,7 +58,7 @@ async function resetRiders() {
   for (const r of RIDERS) {
     await prisma.rider.update({
       where: { id: riderIds[r.phone]! },
-      data: { availability: 'ONLINE', currentLat: r.lat, currentLng: r.lng, zoneId: null },
+      data: { availability: 'ONLINE', currentLat: r.lat, currentLng: r.lng, lastLocationAt: new Date(), zoneId: null },
     });
   }
 }

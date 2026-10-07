@@ -70,9 +70,14 @@ describe('admin panel modals', () => {
   });
 
   it('assign-rider / dispatch endpoints respond', async () => {
-    const riders = await api().get('/api/v1/admin/riders').set(auth(adminToken));
+    const riders = await api().get('/api/v1/admin/riders?search=Sunil Kumar').set(auth(adminToken));
     expect(riders.body.data[0].status).toMatch(/Online|Offline|On Delivery/);
-    expect(riders.body.data[0].vehicle).toBe('Scooter');
+    // find the rider by name rather than trusting list order: other tests in
+    // this suite change a seeded rider's vehicle, and the list is not ordered
+    // by anything this assertion controls
+    const sunil = riders.body.data.find((r: { name: string }) => r.name === 'Sunil Kumar');
+    expect(sunil).toBeTruthy();
+    expect(['Scooter', 'Motorcycle', 'Bicycle', 'Van']).toContain(sunil.vehicle);
   });
 
   it('ZoneModal: accepts Operational | Paused', async () => {

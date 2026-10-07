@@ -61,6 +61,13 @@ const schema = z.object({
   DISPATCH_RADIUS_KM: z.coerce.number().default(8),
   /** how many candidates are queued per cascade round */
   DISPATCH_MAX_CANDIDATES: z.coerce.number().default(15),
+  /**
+   * How old a rider's last reported position may be before we stop trusting it
+   * for "nearest first". A rider who went online, sent one fix and closed the
+   * app would otherwise keep winning the nearest slot and burning an offer
+   * window on every order.
+   */
+  RIDER_LOCATION_MAX_AGE_MINUTES: z.coerce.number().default(10),
 
   UPLOAD_DIR: z.string().default('uploads'),
   MAX_UPLOAD_MB: z.coerce.number().default(8),

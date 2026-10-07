@@ -95,6 +95,12 @@ Parameters:
   DispatchMaxCandidates:
     Type: String
     Default: '15'
+  RiderLocationMaxAgeMinutes:
+    Type: String
+    Default: '10'
+    Description: >-
+      How old a rider's last GPS fix may be before it is ignored for
+      nearest-first ranking. Such riders are still offered work, but last.
   OtpChannel:
     Type: String
     Default: sms
@@ -498,6 +504,7 @@ Resources:
             - { Name: VENDOR_REQUEST_TTL_SECONDS, Value: !Ref VendorRequestTtlSeconds }
             - { Name: DISPATCH_RADIUS_KM, Value: !Ref DispatchRadiusKm }
             - { Name: DISPATCH_MAX_CANDIDATES, Value: !Ref DispatchMaxCandidates }
+            - { Name: RIDER_LOCATION_MAX_AGE_MINUTES, Value: !Ref RiderLocationMaxAgeMinutes }
             - { Name: SMS_DLT_ENTITY_ID, Value: !Ref SmsDltEntityId }
             - { Name: SMS_OTP_TEMPLATE_ID, Value: !Ref SmsOtpTemplateId }
             - { Name: MSG91_AUTH_KEY, Value: !Ref Msg91AuthKey }

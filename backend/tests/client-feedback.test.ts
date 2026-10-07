@@ -43,7 +43,7 @@ async function resetRiders() {
   for (const r of RIDERS) {
     await prisma.rider.update({
       where: { id: riderIds[r.phone]! },
-      data: { availability: 'ONLINE', currentLat: r.lat, currentLng: r.lng, zoneId: null, onboardingStatus: 'APPROVED' },
+      data: { availability: 'ONLINE', currentLat: r.lat, currentLng: r.lng, lastLocationAt: new Date(), zoneId: null, onboardingStatus: 'APPROVED' },
     });
   }
 }
@@ -381,6 +381,26 @@ describe('rider: hand-off speed (TAT)', () => {
     const next = await liveOffer(orderId);
     expect(next).toBeTruthy();
     expect(next!.riderId).not.toBe(offer!.riderId);
+  });
+
+  it('ignores a rider whose GPS fix is stale, so the offer is not wasted on them', async () => {
+    await resetRiders();
+    // the nearest rider went online, sent one fix, and closed the app an hour ago
+    await prisma.rider.update({
+      where: { id: riderIds[RIDERS[0]!.phone]! },
+      data: { lastLocationAt: new Date(Date.now() - 60 * 60_000) },
+    });
+
+    const orderId = await placeOrder();
+    const offer = await liveOffer(orderId);
+    expect(offer).toBeTruthy();
+    // the second-nearest, whose position we can still trust, is asked first
+    expect(offer!.riderId).toBe(riderIds[RIDERS[1]!.phone]);
+
+    // the stale rider is still in the running, just last
+    const dispatch = await prisma.dispatch.findFirst({ where: { orderId, kind: 'RIDER_PICKUP' } });
+    expect(dispatch!.candidates).toContain(riderIds[RIDERS[0]!.phone]);
+    expect(dispatch!.candidates.indexOf(riderIds[RIDERS[0]!.phone]!)).toBeGreaterThan(0);
   });
 
   it('two sweeps racing on the same offer do not skip a rider', async () => {

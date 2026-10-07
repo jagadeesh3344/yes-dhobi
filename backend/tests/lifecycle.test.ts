@@ -45,7 +45,7 @@ beforeAll(async () => {
   riderToken = rider.body.accessToken;
   riderId = rider.body.rider.id;
   // make sure the rider is free and online for dispatch
-  await prisma.rider.update({ where: { id: riderId }, data: { availability: 'ONLINE', currentLat: 12.915, currentLng: 77.64 } });
+  await prisma.rider.update({ where: { id: riderId }, data: { availability: 'ONLINE', currentLat: 12.915, currentLng: 77.64, lastLocationAt: new Date() } });
 });
 
 describe('customer auth (phone OTP)', () => {

@@ -115,7 +115,7 @@ async function rankRiders(
       ? { lat: order.addressLat, lng: order.addressLng }
       : { lat: order.vendor?.latitude ?? order.addressLat, lng: order.vendor?.longitude ?? order.addressLng };
 
-  const riders = await prisma.rider.findMany({
+  let riders = await prisma.rider.findMany({
     where: {
       onboardingStatus: 'APPROVED',
       availability: 'ONLINE',
@@ -126,24 +126,40 @@ async function rankRiders(
     select: { id: true, currentLat: true, currentLng: true, rating: true, lastLocationAt: true },
   });
 
+  // Fallback: If no rider found with zone match, search without zone constraint
+  if (riders.length === 0 && order.zoneId) {
+    riders = await prisma.rider.findMany({
+      where: {
+        onboardingStatus: 'APPROVED',
+        availability: 'ONLINE',
+        user: { status: 'ACTIVE' },
+        ...(exclude.length ? { id: { notIn: exclude } } : {}),
+      },
+      select: { id: true, currentLat: true, currentLng: true, rating: true, lastLocationAt: true },
+    });
+  }
+
   // A position we have not heard in a while is not a position. Such riders stay
   // in the running - better them than nobody - but they rank behind everyone we
   // can actually locate, instead of sitting at the front of the queue.
   const freshAfter = dayjs().subtract(env.RIDER_LOCATION_MAX_AGE_MINUTES, 'minute');
 
-  return riders
-    .map((r) => {
-      const fresh = r.lastLocationAt != null && dayjs(r.lastLocationAt).isAfter(freshAfter);
-      return {
-        id: r.id,
-        rating: r.rating,
-        distance:
-          fresh && origin.lat != null && origin.lng != null && r.currentLat != null && r.currentLng != null
-            ? round2(distanceKm(origin.lat, origin.lng, r.currentLat, r.currentLng))
-            : null,
-      };
-    })
-    .filter((r) => r.distance == null || r.distance <= radiusKm)
+  const mapped = riders.map((r) => {
+    const fresh = r.lastLocationAt != null && dayjs(r.lastLocationAt).isAfter(freshAfter);
+    return {
+      id: r.id,
+      rating: r.rating,
+      distance:
+        fresh && origin.lat != null && origin.lng != null && r.currentLat != null && r.currentLng != null
+          ? round2(distanceKm(origin.lat, origin.lng, r.currentLat, r.currentLng))
+          : null,
+    };
+  });
+
+  const withinRadius = mapped.filter((r) => r.distance == null || r.distance <= radiusKm);
+  const candidates = withinRadius.length > 0 ? withinRadius : mapped;
+
+  return candidates
     // nearest first; riders we cannot currently locate go last
     .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999) || b.rating - a.rating)
     .slice(0, env.DISPATCH_MAX_CANDIDATES)

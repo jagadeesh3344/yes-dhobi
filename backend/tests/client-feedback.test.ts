@@ -345,6 +345,72 @@ describe('rider: dispatch does not loop between riders who declined', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('rider: hand-off speed (TAT)', () => {
+  it('passes a declined offer to the next rider with no sweep in between', async () => {
+    await resetRiders();
+    const orderId = await placeOrder();
+    const offer = await liveOffer(orderId);
+    const phone = offer!.rider.user.phone!.replace('+91', '');
+
+    const t0 = Date.now();
+    const res = await api().post(`/api/v1/riders/me/requests/${offer!.id}/decline`).set(auth(riderTokens[phone]!));
+    expect(res.status).toBe(200);
+
+    // the next offer exists by the time the decline call returns - the cascade
+    // moves on inside the request, it does not wait for the sweeper
+    const next = await liveOffer(orderId);
+    expect(next).toBeTruthy();
+    expect(next!.riderId).not.toBe(offer!.riderId);
+    expect(Date.now() - t0).toBeLessThan(1500);
+  });
+
+  it('retires a lapsed offer and moves on without waiting for the next sweep', async () => {
+    const { sweepDispatches } = await import('../src/services/dispatch.js');
+    await resetRiders();
+    const orderId = await placeOrder();
+    const offer = await liveOffer(orderId);
+    expect(offer).toBeTruthy();
+
+    // bring the deadline forward instead of waiting out the real 15 s
+    await prisma.pickupRequest.update({ where: { id: offer!.id }, data: { expiresAt: new Date(Date.now() - 50) } });
+    await prisma.dispatch.updateMany({ where: { orderId, status: 'ACTIVE' }, data: { expiresAt: new Date(Date.now() - 50) } });
+    await sweepDispatches();
+
+    const expired = await prisma.pickupRequest.findUnique({ where: { id: offer!.id } });
+    expect(expired?.status).toBe('EXPIRED');
+    const next = await liveOffer(orderId);
+    expect(next).toBeTruthy();
+    expect(next!.riderId).not.toBe(offer!.riderId);
+  });
+
+  it('two sweeps racing on the same offer do not skip a rider', async () => {
+    const { sweepDispatches } = await import('../src/services/dispatch.js');
+    await resetRiders();
+    const orderId = await placeOrder();
+    const first = await liveOffer(orderId);
+    expect(first).toBeTruthy();
+
+    const dispatchBefore = await prisma.dispatch.findFirst({ where: { orderId, kind: 'RIDER_PICKUP', status: 'ACTIVE' } });
+    const cursorBefore = dispatchBefore!.cursor;
+
+    await prisma.pickupRequest.update({ where: { id: first!.id }, data: { expiresAt: new Date(Date.now() - 50) } });
+    await prisma.dispatch.updateMany({ where: { orderId, status: 'ACTIVE' }, data: { expiresAt: new Date(Date.now() - 50) } });
+
+    // the offer's own timer and the sweeper can both fire on one lapsed offer;
+    // only one of them may move the cursor, or a rider gets skipped entirely
+    await Promise.all([sweepDispatches(), sweepDispatches(), sweepDispatches()]);
+
+    const dispatchAfter = await prisma.dispatch.findFirst({ where: { orderId, kind: 'RIDER_PICKUP' } });
+    expect(dispatchAfter!.cursor).toBe(cursorBefore + 1);
+
+    const next = await liveOffer(orderId);
+    expect(next).toBeTruthy();
+    // the very next candidate in the list, not the one after it
+    expect(next!.riderId).toBe(dispatchAfter!.candidates[cursorBefore + 1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe('rider: verification verdict', () => {
   it('a rejected rider is locked out with the exact message and a 24 hour wait', async () => {
     const phone = RIDERS[2]!.phone;

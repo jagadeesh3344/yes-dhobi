@@ -186,6 +186,7 @@ async function rankVendors(
 async function cancelActiveDispatches(orderId: string, kind?: DispatchKind) {
   const active = await prisma.dispatch.findMany({ where: { orderId, status: 'ACTIVE', ...(kind ? { kind } : {}) } });
   for (const d of active) {
+    if (d.currentOfferId) clearOfferTimer(d.currentOfferId);
     await prisma.dispatch.update({ where: { id: d.id }, data: { status: 'CANCELLED', currentOfferId: null, expiresAt: null } });
     if (d.kind === 'VENDOR') {
       await prisma.vendorRequest.updateMany({ where: { orderId, status: 'OFFERED' }, data: { status: 'CANCELLED', respondedAt: new Date() } });
@@ -367,6 +368,7 @@ async function offerNext(dispatchId: string): Promise<boolean> {
       include: { order: { include: orderInclude } },
     });
     await prisma.dispatch.update({ where: { id: dispatch.id }, data: { currentOfferId: req.id, expiresAt } });
+    scheduleOfferExpiry(dispatch.id, req.id, 'VENDOR', ttl);
 
     realtime.toUser(vendor.userId, 'vendor_request:new', serializeVendorRequest(req));
     await notifyUser(vendor.userId, {
@@ -395,6 +397,7 @@ async function offerNext(dispatchId: string): Promise<boolean> {
     include: { order: { include: orderInclude } },
   });
   await prisma.dispatch.update({ where: { id: dispatch.id }, data: { currentOfferId: req.id, expiresAt } });
+  scheduleOfferExpiry(dispatch.id, req.id, dispatch.kind, ttl);
 
   realtime.toUser(rider.userId, 'pickup_request:new', serializeRequest(req));
   await notifyUser(rider.userId, {
@@ -408,15 +411,87 @@ async function offerNext(dispatchId: string): Promise<boolean> {
 }
 
 /** Move the cursor on and offer the next candidate straight away. */
-async function advance(dispatchId: string, reason: string): Promise<boolean> {
-  const dispatch = await prisma.dispatch.findUnique({ where: { id: dispatchId } });
-  if (!dispatch || dispatch.status !== 'ACTIVE') return false;
-  logger.debug({ dispatchId, reason, cursor: dispatch.cursor }, 'dispatch: passing to next candidate');
-  await prisma.dispatch.update({
-    where: { id: dispatchId },
-    data: { cursor: dispatch.cursor + 1, currentOfferId: null, expiresAt: null },
+async function advance(dispatchId: string, reason: string, expectOfferId: string | null = null): Promise<boolean> {
+  // Conditional on the offer we believe is live, so that two callers racing to
+  // retire the same offer - the per-offer timer and the sweeper, or a decline
+  // arriving just as the timer fires - cannot each bump the cursor and skip a
+  // candidate. Whoever loses the race sees 0 rows updated and stops.
+  const { count } = await prisma.dispatch.updateMany({
+    where: { id: dispatchId, status: 'ACTIVE', currentOfferId: expectOfferId },
+    data: { cursor: { increment: 1 }, currentOfferId: null, expiresAt: null },
   });
+  if (count === 0) {
+    logger.debug({ dispatchId, reason }, 'dispatch: already moved on, nothing to do');
+    return false;
+  }
+  logger.debug({ dispatchId, reason }, 'dispatch: passing to next candidate');
   return offerNext(dispatchId);
+}
+
+// ---------------------------------------------------------------------------
+// Pass-on timing
+// ---------------------------------------------------------------------------
+
+/**
+ * One timer per live offer, so an unanswered offer is retired the instant it
+ * runs out instead of waiting for the next sweep. The sweeper stays as the
+ * safety net for offers whose timer was lost - another instance created them,
+ * or this process restarted - but in normal running the timer gets there first
+ * and the hand-off is immediate.
+ */
+const offerTimers = new Map<string, NodeJS.Timeout>();
+
+function clearOfferTimer(offerId: string) {
+  const t = offerTimers.get(offerId);
+  if (t) {
+    clearTimeout(t);
+    offerTimers.delete(offerId);
+  }
+}
+
+function scheduleOfferExpiry(dispatchId: string, offerId: string, kind: DispatchKind, ttlSeconds: number) {
+  clearOfferTimer(offerId);
+  const timer = setTimeout(
+    () => {
+      offerTimers.delete(offerId);
+      expireOfferAndAdvance(dispatchId, offerId, kind).catch((err) =>
+        logger.error({ err, dispatchId, offerId }, 'offer expiry timer failed'),
+      );
+    },
+    // a hair past the deadline so a rider tapping Accept on the last tick wins
+    ttlSeconds * 1000 + 150,
+  );
+  timer.unref();
+  offerTimers.set(offerId, timer);
+}
+
+/**
+ * Mark a lapsed offer EXPIRED, tell the holder so their screen closes, and move
+ * the cascade on. Safe to call twice: the status update is conditional and
+ * `advance` is guarded on the offer id.
+ */
+async function expireOfferAndAdvance(dispatchId: string, offerId: string, kind: DispatchKind): Promise<void> {
+  const now = new Date();
+  if (kind === 'VENDOR') {
+    const { count } = await prisma.vendorRequest.updateMany({
+      where: { id: offerId, status: 'OFFERED' },
+      data: { status: 'EXPIRED', respondedAt: now },
+    });
+    if (count > 0) {
+      const req = await prisma.vendorRequest.findUnique({ where: { id: offerId }, include: { vendor: { select: { userId: true } } } });
+      if (req) realtime.toUser(req.vendor.userId, 'vendor_request:expired', { requestId: req.id, orderId: req.orderId });
+    }
+  } else {
+    const { count } = await prisma.pickupRequest.updateMany({
+      where: { id: offerId, status: 'OFFERED' },
+      data: { status: 'EXPIRED', respondedAt: now },
+    });
+    if (count > 0) {
+      const req = await prisma.pickupRequest.findUnique({ where: { id: offerId }, include: { rider: { select: { userId: true } } } });
+      if (req) realtime.toUser(req.rider.userId, 'pickup_request:expired', { requestId: req.id, orderId: req.orderId });
+    }
+  }
+  await advance(dispatchId, 'offer expired', offerId);
 }
 
 /** Nobody in the list took it: widen the radius once, then hand over to admins. */
@@ -464,6 +539,7 @@ async function widenOrGiveUp(dispatch: Dispatch, order: Awaited<ReturnType<typeo
 // ---------------------------------------------------------------------------
 
 export async function acceptRequest(requestId: string, riderId: string) {
+  clearOfferTimer(requestId);
   const result = await prisma.$transaction(async (tx) => {
     const req = await tx.pickupRequest.findUnique({ where: { id: requestId }, include: { order: true } });
     if (!req || req.riderId !== riderId) throw notFound('Request');
@@ -530,6 +606,7 @@ export async function declineRequest(requestId: string, riderId: string) {
   if (!req || req.riderId !== riderId) throw notFound('Request');
   if (req.status !== 'OFFERED') return req;
 
+  clearOfferTimer(req.id);
   const updated = await prisma.pickupRequest.update({ where: { id: req.id }, data: { status: 'DECLINED', respondedAt: new Date() } });
   realtime.toUser(req.rider.userId, 'pickup_request:closed', { requestId: req.id, orderId: req.orderId });
 
@@ -537,7 +614,7 @@ export async function declineRequest(requestId: string, riderId: string) {
   const dispatch = await prisma.dispatch.findFirst({
     where: { orderId: req.orderId, kind: RIDER_KIND[req.leg], status: 'ACTIVE', currentOfferId: req.id },
   });
-  if (dispatch) await advance(dispatch.id, 'rider declined');
+  if (dispatch) await advance(dispatch.id, 'rider declined', req.id);
   return updated;
 }
 
@@ -554,6 +631,7 @@ export async function acceptVendorRequest(orderId: string, vendorId: string) {
   const accepted = await prisma.$transaction(async (tx) => {
     const req = await tx.vendorRequest.findFirst({ where: { orderId, vendorId, status: 'OFFERED' }, orderBy: { offeredAt: 'desc' } });
     if (!req) throw notFound('Order request');
+    clearOfferTimer(req.id);
     if (req.expiresAt < new Date()) {
       await tx.vendorRequest.update({ where: { id: req.id }, data: { status: 'EXPIRED', respondedAt: new Date() } });
       throw conflict('This request expired and has moved to another partner');
@@ -626,6 +704,7 @@ export async function declineVendorRequest(orderId: string, vendorId: string, re
   const req = await prisma.vendorRequest.findFirst({ where: { orderId, vendorId, status: 'OFFERED' }, orderBy: { offeredAt: 'desc' } });
   if (!req) throw notFound('Order request');
 
+  clearOfferTimer(req.id);
   await prisma.vendorRequest.update({ where: { id: req.id }, data: { status: 'DECLINED', respondedAt: new Date(), declineReason: reason } });
   const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { shopName: true, userId: true } });
   await addEvent(prisma, orderId, {
@@ -637,7 +716,7 @@ export async function declineVendorRequest(orderId: string, vendorId: string, re
 
   // pass it straight to the next nearest partner
   const dispatch = await prisma.dispatch.findFirst({ where: { orderId, kind: 'VENDOR', status: 'ACTIVE', currentOfferId: req.id } });
-  if (dispatch) await advance(dispatch.id, 'vendor declined');
+  if (dispatch) await advance(dispatch.id, 'vendor declined', req.id);
   return req;
 }
 
@@ -749,22 +828,14 @@ export async function sweepDispatches() {
   });
 
   for (const d of due) {
+    // normally the offer's own timer got here first and this finds nothing to do
     if (d.currentOfferId) {
-      if (d.kind === 'VENDOR') {
-        const req = await prisma.vendorRequest.findUnique({ where: { id: d.currentOfferId }, include: { vendor: { select: { userId: true } } } });
-        if (req?.status === 'OFFERED') {
-          await prisma.vendorRequest.update({ where: { id: req.id }, data: { status: 'EXPIRED', respondedAt: now } });
-          realtime.toUser(req.vendor.userId, 'vendor_request:expired', { requestId: req.id, orderId: req.orderId });
-        }
-      } else {
-        const req = await prisma.pickupRequest.findUnique({ where: { id: d.currentOfferId }, include: { rider: { select: { userId: true } } } });
-        if (req?.status === 'OFFERED') {
-          await prisma.pickupRequest.update({ where: { id: req.id }, data: { status: 'EXPIRED', respondedAt: now } });
-          realtime.toUser(req.rider.userId, 'pickup_request:expired', { requestId: req.id, orderId: req.orderId });
-        }
-      }
+      await expireOfferAndAdvance(d.id, d.currentOfferId, d.kind).catch((err) =>
+        logger.error({ err, dispatchId: d.id }, 'sweep: expiry failed'),
+      );
+    } else {
+      await advance(d.id, 'offer expired').catch((err) => logger.error({ err, dispatchId: d.id }, 'advance failed'));
     }
-    await advance(d.id, 'offer expired').catch((err) => logger.error({ err, dispatchId: d.id }, 'advance failed'));
   }
 
   // safety net: stray offers left OFFERED past their expiry
@@ -778,7 +849,7 @@ export async function cancelDispatches(orderId: string) {
 }
 
 let sweeper: NodeJS.Timeout | null = null;
-export function startDispatchSweeper(intervalMs = 5_000) {
+export function startDispatchSweeper(intervalMs = 1_000) {
   if (sweeper) return;
   sweeper = setInterval(() => {
     sweepDispatches().catch((err) => logger.error({ err }, 'dispatch sweeper failed'));

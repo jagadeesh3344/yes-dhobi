@@ -298,10 +298,30 @@ by `python scripts/smoke-test.py <API address>`. To check them by hand:
 
 **Note on the offer timer.** The window is **15 seconds** (the client's later
 instruction), not the 45 seconds in the original feedback note. It is the
-`PickupRequestTtlSeconds` deploy parameter if you want to change it. The server
-expires an unanswered offer by itself and passes it on within ~3 seconds; the
-rider app must close the card when its own countdown reaches zero rather than
-leaving a Decline button on screen.
+`PickupRequestTtlSeconds` deploy parameter if you want to change it.
+
+Measured hand-off times on the current code:
+
+| Situation | Time for the next rider to get it |
+| --- | --- |
+| Rider taps Decline | **~0.03 s** — it happens inside that same request |
+| Rider ignores the offer | **~0.6 s after the 15 s window** (so ~15.6 s from the offer) |
+
+Each live offer now carries its own expiry timer, with a 1-second sweep behind
+it as a safety net. Before this, an ignored offer waited for the sweep and could
+take up to 20 seconds to move on.
+
+The rider app must still close the card when its own countdown reaches zero
+rather than leaving a Decline button on screen — by then the server has already
+passed the order on, so Accept will come back 409.
+
+**If a rider stops receiving offers,** check their availability. A rider goes
+`ON_DELIVERY` when they accept and only returns to `ONLINE` when that job
+finishes (drop-off at the shop, or delivery to the customer) or the order is
+cancelled. A test order left half-finished will therefore keep that rider out of
+the running — cancel it from the admin panel, or have the rider toggle Online
+again, and they start receiving offers immediately. `GET /admin/riders` shows
+everyone's current availability.
 
 ### 10.2 Permissions and limits
 

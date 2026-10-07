@@ -88,8 +88,20 @@ export const orderInclude = {
 export type FullOrder = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 
 export async function loadOrder(idOrNumber: string, client: Tx | typeof prisma = prisma): Promise<FullOrder> {
+  if (!idOrNumber || !idOrNumber.trim()) throw notFound('Order');
+  const clean = idOrNumber.replace(/^#/, '').trim();
+  const strippedYD = clean.replace(/^(YD-)+/i, '');
+  const withPrefix = `YD-${strippedYD}`;
   const order = await client.order.findFirst({
-    where: { OR: [{ id: idOrNumber }, { orderNumber: idOrNumber.replace(/^#/, '') }] },
+    where: {
+      OR: [
+        { id: idOrNumber },
+        { id: clean },
+        { orderNumber: clean },
+        { orderNumber: withPrefix },
+        { orderNumber: strippedYD },
+      ],
+    },
     include: orderInclude,
   });
   if (!order) throw notFound('Order');

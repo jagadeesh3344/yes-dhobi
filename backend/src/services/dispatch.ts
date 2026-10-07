@@ -161,7 +161,7 @@ async function rankVendors(
   exclude: string[] = [],
 ): Promise<{ id: string; distance: number | null }[]> {
   const categoryIds = order.serviceCategoryIds ?? [];
-  const vendors = await prisma.vendor.findMany({
+  let vendors = await prisma.vendor.findMany({
     where: {
       status: 'ACTIVE',
       user: { status: 'ACTIVE' },
@@ -171,24 +171,40 @@ async function rankVendors(
     include: { _count: { select: { orders: { where: { status: { notIn: ['DELIVERED', 'CANCELLED'] } } } } } },
   });
 
-  return vendors
+  // Fallback: if category-specific filter returned no partners, match any active partner
+  if (vendors.length === 0 && categoryIds.length > 0) {
+    vendors = await prisma.vendor.findMany({
+      where: {
+        status: 'ACTIVE',
+        user: { status: 'ACTIVE' },
+        ...(exclude.length ? { id: { notIn: exclude } } : {}),
+      },
+      include: { _count: { select: { orders: { where: { status: { notIn: ['DELIVERED', 'CANCELLED'] } } } } } },
+    });
+  }
+
+  const scored = vendors
     .map((v) => {
       const distance =
         order.addressLat != null && order.addressLng != null && v.latitude != null && v.longitude != null
           ? round2(distanceKm(order.addressLat, order.addressLng, v.latitude, v.longitude))
           : null;
-      const sameCity = Boolean(order.city && v.city.toLowerCase() === order.city.toLowerCase());
+      const sameCity = Boolean(order.city && v.city && v.city.toLowerCase().trim() === order.city.toLowerCase().trim());
       const load = v._count.orders / Math.max(1, v.dailyCapacityKg / 5);
-      // A shop with no map pin can still be used - we fall back to the city -
-      // but it must rank behind every shop we can actually measure. The penalty
-      // is deliberately far larger than any real distance plus load, because a
-      // flat score here used to let an unpinned shop outrank a nearby one as
-      // soon as that nearby shop picked up a few open orders.
       const UNPINNED = 10_000;
       return { id: v.id, distance, sameCity, score: distance == null ? UNPINNED + load * 2 : distance + load * 2 };
-    })
-    .filter((v) => (v.distance == null ? v.sameCity : v.distance <= radiusKm))
-    .sort((a, b) => a.score - b.score)
+    });
+
+  let candidates = scored
+    .filter((v) => (v.distance == null ? (v.sameCity || !order.city) : v.distance <= radiusKm))
+    .sort((a, b) => a.score - b.score);
+
+  // Fallback: if distance filter excluded all active partners, keep available active partners sorted by score
+  if (candidates.length === 0 && scored.length > 0) {
+    candidates = scored.sort((a, b) => a.score - b.score);
+  }
+
+  return candidates
     .slice(0, env.DISPATCH_MAX_CANDIDATES)
     .map(({ id, distance }) => ({ id, distance }));
 }
@@ -637,13 +653,44 @@ export async function declineRequest(requestId: string, riderId: string) {
 // ---------------------------------------------------------------------------
 
 /** The offer a partner is currently holding for an order (or null). */
-export async function activeVendorRequest(orderId: string, vendorId: string) {
-  return prisma.vendorRequest.findFirst({ where: { orderId, vendorId, status: 'OFFERED' }, orderBy: { offeredAt: 'desc' } });
+export async function activeVendorRequest(idOrNumber: string, vendorId: string) {
+  try {
+    const o = await loadOrder(idOrNumber);
+    return prisma.vendorRequest.findFirst({
+      where: {
+        OR: [
+          { orderId: o.id, vendorId, status: 'OFFERED' },
+          { id: idOrNumber, vendorId, status: 'OFFERED' },
+        ],
+      },
+      orderBy: { offeredAt: 'desc' },
+    });
+  } catch {
+    return prisma.vendorRequest.findFirst({
+      where: {
+        OR: [
+          { orderId: idOrNumber, vendorId, status: 'OFFERED' },
+          { id: idOrNumber, vendorId, status: 'OFFERED' },
+        ],
+      },
+      orderBy: { offeredAt: 'desc' },
+    });
+  }
 }
 
-export async function acceptVendorRequest(orderId: string, vendorId: string) {
+export async function acceptVendorRequest(idOrNumber: string, vendorId: string) {
+  const o = await loadOrder(idOrNumber);
+  const orderId = o.id;
   const accepted = await prisma.$transaction(async (tx) => {
-    const req = await tx.vendorRequest.findFirst({ where: { orderId, vendorId, status: 'OFFERED' }, orderBy: { offeredAt: 'desc' } });
+    const req = await tx.vendorRequest.findFirst({
+      where: {
+        OR: [
+          { orderId, vendorId, status: 'OFFERED' },
+          { id: idOrNumber, vendorId, status: 'OFFERED' },
+        ],
+      },
+      orderBy: { offeredAt: 'desc' },
+    });
     if (!req) throw notFound('Order request');
     clearOfferTimer(req.id);
     if (req.expiresAt < new Date()) {
@@ -689,47 +736,60 @@ export async function acceptVendorRequest(orderId: string, vendorId: string) {
     return { vendor };
   });
 
-  const o = await broadcastOrder(orderId);
+  const fullOrder = await broadcastOrder(orderId);
 
   // tell the rider where to drop the clothes
-  if (o.pickupRider) {
-    realtime.toUser(o.pickupRider.userId, 'order:dropoff_assigned', {
-      orderId: o.id,
-      orderNumber: o.orderNumber,
+  if (fullOrder.pickupRider) {
+    realtime.toUser(fullOrder.pickupRider.userId, 'order:dropoff_assigned', {
+      orderId: fullOrder.id,
+      orderNumber: fullOrder.orderNumber,
       vendor: { name: accepted.vendor.shopName, address: accepted.vendor.shopAddress, lat: accepted.vendor.latitude, lng: accepted.vendor.longitude },
     });
-    await notifyUser(o.pickupRider.userId, {
+    await notifyUser(fullOrder.pickupRider.userId, {
       title: 'Drop-off location confirmed',
-      message: `Take order ${o.orderNumber} to ${accepted.vendor.shopName}, ${accepted.vendor.shopAddress}`,
+      message: `Take order ${fullOrder.orderNumber} to ${accepted.vendor.shopName}, ${accepted.vendor.shopAddress}`,
       type: 'ORDER',
-      data: { orderId: o.id, vendorId },
+      data: { orderId: fullOrder.id, vendorId },
     });
   }
-  await notifyUser(o.customer.userId, {
+  await notifyUser(fullOrder.customer.userId, {
     title: 'Laundry partner confirmed',
-    message: `${accepted.vendor.shopName} will take care of order ${o.orderNumber}.`,
+    message: `${accepted.vendor.shopName} will take care of order ${fullOrder.orderNumber}.`,
     type: 'ORDER',
-    data: { orderId: o.id },
+    data: { orderId: fullOrder.id },
   });
-  return o;
+  return fullOrder;
 }
 
-export async function declineVendorRequest(orderId: string, vendorId: string, reason?: string) {
-  const req = await prisma.vendorRequest.findFirst({ where: { orderId, vendorId, status: 'OFFERED' }, orderBy: { offeredAt: 'desc' } });
+export async function declineVendorRequest(idOrNumber: string, vendorId: string, reason?: string) {
+  let orderId = idOrNumber;
+  try {
+    const o = await loadOrder(idOrNumber);
+    orderId = o.id;
+  } catch {}
+  const req = await prisma.vendorRequest.findFirst({
+    where: {
+      OR: [
+        { orderId, vendorId, status: 'OFFERED' },
+        { id: idOrNumber, vendorId, status: 'OFFERED' },
+      ],
+    },
+    orderBy: { offeredAt: 'desc' },
+  });
   if (!req) throw notFound('Order request');
 
   clearOfferTimer(req.id);
   await prisma.vendorRequest.update({ where: { id: req.id }, data: { status: 'DECLINED', respondedAt: new Date(), declineReason: reason } });
   const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { shopName: true, userId: true } });
-  await addEvent(prisma, orderId, {
+  await addEvent(prisma, req.orderId, {
     type: 'VENDOR_DECLINED',
     title: 'Declined by laundry partner',
     description: `${vendor?.shopName ?? ''}${reason ? `: ${reason}` : ''}`,
   });
-  if (vendor) realtime.toUser(vendor.userId, 'vendor_request:closed', { requestId: req.id, orderId });
+  if (vendor) realtime.toUser(vendor.userId, 'vendor_request:closed', { requestId: req.id, orderId: req.orderId });
 
   // pass it straight to the next nearest partner
-  const dispatch = await prisma.dispatch.findFirst({ where: { orderId, kind: 'VENDOR', status: 'ACTIVE', currentOfferId: req.id } });
+  const dispatch = await prisma.dispatch.findFirst({ where: { orderId: req.orderId, kind: 'VENDOR', status: 'ACTIVE', currentOfferId: req.id } });
   if (dispatch) await advance(dispatch.id, 'vendor declined', req.id);
   return req;
 }

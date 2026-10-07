@@ -198,8 +198,36 @@ async function cancelActiveDispatches(orderId: string, kind?: DispatchKind) {
   }
 }
 
+/**
+ * Riders who have already refused this leg (declined, or let the offer run out).
+ * A restarted cascade must skip them, otherwise the order ping-pongs between the
+ * same riders forever.
+ */
+async function ridersWhoRefused(orderId: string, leg: RequestLeg): Promise<string[]> {
+  const rows = await prisma.pickupRequest.findMany({
+    where: { orderId, leg, status: { in: ['DECLINED', 'EXPIRED'] } },
+    select: { riderId: true },
+    distinct: ['riderId'],
+  });
+  return rows.map((r) => r.riderId);
+}
+
+/** Same, for laundry partners. */
+async function vendorsWhoRefused(orderId: string): Promise<string[]> {
+  const rows = await prisma.vendorRequest.findMany({
+    where: { orderId, status: { in: ['DECLINED', 'EXPIRED'] } },
+    select: { vendorId: true },
+    distinct: ['vendorId'],
+  });
+  return rows.map((r) => r.vendorId);
+}
+
 /** Start (or restart) the rider waterfall for a leg. Returns candidates found. */
-export async function startRiderDispatch(orderId: string, leg: RequestLeg, opts: { riderIds?: string[] } = {}): Promise<number> {
+export async function startRiderDispatch(
+  orderId: string,
+  leg: RequestLeg,
+  opts: { riderIds?: string[]; includeRefused?: boolean } = {},
+): Promise<number> {
   const order = await loadOrder(orderId);
   if (order.status === 'CANCELLED' || order.status === 'DELIVERED') throw unprocessable('Order is closed');
   if (leg === 'PICKUP' && order.pickupRiderId) throw conflict('A pickup rider is already assigned');
@@ -208,12 +236,21 @@ export async function startRiderDispatch(orderId: string, leg: RequestLeg, opts:
   const kind = RIDER_KIND[leg];
   await cancelActiveDispatches(orderId, kind);
 
+  // Riders who already said no are skipped, so a restarted cascade cannot
+  // ping-pong between the same riders. Two cases override that: an admin
+  // pinning specific riders, and an admin pressing "search again" - a
+  // deliberate human decision to give everyone another go.
+  const refused = opts.riderIds?.length || opts.includeRefused ? [] : await ridersWhoRefused(orderId, leg);
   const candidates = opts.riderIds?.length
     ? opts.riderIds.map((id) => ({ id, distance: null as number | null }))
-    : await rankRiders(order, leg, env.DISPATCH_RADIUS_KM);
+    : await rankRiders(order, leg, env.DISPATCH_RADIUS_KM, refused);
 
   if (candidates.length === 0) {
-    await noCandidates(order, kind, 'No riders are online nearby');
+    await noCandidates(
+      order,
+      kind,
+      refused.length ? `All ${refused.length} rider(s) in range already declined this order` : 'No riders are online nearby',
+    );
     return 0;
   }
 
@@ -230,19 +267,29 @@ export async function startRiderDispatch(orderId: string, leg: RequestLeg, opts:
 }
 
 /** Start the laundry-partner waterfall (called once a pickup rider accepts). */
-export async function startVendorDispatch(orderId: string, opts: { vendorIds?: string[] } = {}): Promise<number> {
+export async function startVendorDispatch(
+  orderId: string,
+  opts: { vendorIds?: string[]; includeRefused?: boolean } = {},
+): Promise<number> {
   const order = await loadOrder(orderId);
   if (order.status === 'CANCELLED' || order.status === 'DELIVERED') throw unprocessable('Order is closed');
   if (order.vendorId) throw conflict('A laundry partner is already assigned');
 
   await cancelActiveDispatches(orderId, 'VENDOR');
 
+  const refused = opts.vendorIds?.length || opts.includeRefused ? [] : await vendorsWhoRefused(orderId);
   const candidates = opts.vendorIds?.length
     ? opts.vendorIds.map((id) => ({ id, distance: null as number | null }))
-    : await rankVendors(order, env.DISPATCH_RADIUS_KM);
+    : await rankVendors(order, env.DISPATCH_RADIUS_KM, refused);
 
   if (candidates.length === 0) {
-    await noCandidates(order, 'VENDOR', 'No laundry partner in range offers these services');
+    await noCandidates(
+      order,
+      'VENDOR',
+      refused.length
+        ? `All ${refused.length} partner(s) in range already declined this order`
+        : 'No laundry partner in range offers these services',
+    );
     return 0;
   }
 
@@ -377,10 +424,14 @@ async function widenOrGiveUp(dispatch: Dispatch, order: Awaited<ReturnType<typeo
   if (dispatch.round === 1) {
     const radiusKm = (dispatch.radiusKm ?? env.DISPATCH_RADIUS_KM) * 2;
     const tried = dispatch.candidates;
+    const skip =
+      dispatch.kind === 'VENDOR'
+        ? [...new Set([...tried, ...(await vendorsWhoRefused(order.id))])]
+        : [...new Set([...tried, ...(await ridersWhoRefused(order.id, LEG_OF[dispatch.kind]!))])];
     const more =
       dispatch.kind === 'VENDOR'
-        ? await rankVendors(order, radiusKm, tried)
-        : await rankRiders(order, LEG_OF[dispatch.kind]!, radiusKm, tried);
+        ? await rankVendors(order, radiusKm, skip)
+        : await rankRiders(order, LEG_OF[dispatch.kind]!, radiusKm, skip);
 
     if (more.length > 0) {
       await prisma.dispatch.update({

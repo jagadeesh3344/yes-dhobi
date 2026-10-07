@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, paginated, parseBody, parsePagination, parseQuery } from '../../lib/http.js';
 import { notFound } from '../../lib/errors.js';
+import { distanceKm } from '../../lib/utils.js';
 import { requireCustomer } from '../../middleware/auth.js';
 import { buildQuote, validatePromotion } from '../../services/pricing.js';
-import { loadOrder, orderInclude, serializeOrder, trackingSteps } from '../../services/orders.js';
+import { cancellation, loadOrder, orderInclude, serializeOrder, trackingSteps } from '../../services/orders.js';
 import { createOrder, customerCancelOrder, rateOrder, statusWhere } from './orders.service.js';
 import { getSettings } from '../../services/settings.js';
 
@@ -94,13 +95,59 @@ ordersRouter.get(
   }),
 );
 
+/**
+ * Live tracking for the order-tracking screen's map.
+ *
+ * `map` carries everything needed to draw it in one call: the customer's pin,
+ * the rider's last reported position, the shop, and which leg is moving. The
+ * app should draw this once, then follow the `rider:location` socket event on
+ * the `order:<id>` room for movement (the rider app posts every few seconds)
+ * and `order:updated` for status changes.
+ */
 ordersRouter.get(
   '/:id/track',
   asyncHandler(async (req, res) => {
     const order = await loadOrder(req.params.id!);
     if (order.customerId !== req.user!.customerId) throw notFound('Order');
     const s = serializeOrder(order, 'customer');
-    res.json({ id: s.id, orderNumber: s.orderNumber, status: s.status, statusLabel: s.statusLabel, tracking: trackingSteps(order.status), rider: s.rider, deliveryEta: s.deliveryEta, otps: { pickup: order.customerPickupOtp, delivery: order.customerDeliveryOtp }, events: s.events });
+    const cancel = cancellation(order);
+
+    const leg = ['READY', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.status) ? 'DELIVERY' : 'PICKUP';
+    const rider = leg === 'DELIVERY' ? (order.deliveryRider ?? order.pickupRider) : order.pickupRider;
+    const riderPoint = rider?.currentLat != null && rider.currentLng != null ? { lat: rider.currentLat, lng: rider.currentLng, updatedAt: rider.lastLocationAt } : null;
+    const customerPoint = order.addressLat != null && order.addressLng != null ? { lat: order.addressLat, lng: order.addressLng } : null;
+    // on the pickup leg the rider is heading to the customer; after that, to the shop and back
+    const destination = leg === 'PICKUP' ? customerPoint : customerPoint;
+    const etaMinutes =
+      riderPoint && destination
+        ? Math.max(1, Math.round((distanceKm(riderPoint.lat, riderPoint.lng, destination.lat, destination.lng) / 18) * 60))
+        : null;
+
+    res.json({
+      id: s.id,
+      orderNumber: s.orderNumber,
+      status: s.status,
+      statusLabel: s.statusLabel,
+      tracking: trackingSteps(order.status),
+      rider: s.rider,
+      deliveryEta: s.deliveryEta,
+      otps: { pickup: order.customerPickupOtp, delivery: order.customerDeliveryOtp },
+      canCancel: cancel.canCancel,
+      cancelBlockedReason: cancel.reason,
+      map: {
+        /** true once a rider is moving and we have a fix on them */
+        live: Boolean(riderPoint) && !['DELIVERED', 'CANCELLED'].includes(order.status),
+        leg,
+        customer: customerPoint,
+        riderPosition: riderPoint,
+        riderArrived: Boolean(leg === 'PICKUP' ? order.pickupArrivedAt : order.deliveryArrivedAt),
+        vendor: order.vendor?.latitude != null && order.vendor.longitude != null ? { lat: order.vendor.latitude, lng: order.vendor.longitude, name: order.vendor.shopName } : null,
+        etaMinutes,
+        /** follow these on the socket instead of polling this endpoint */
+        socket: { room: `order:${order.id}`, events: ['rider:location', 'order:updated'] },
+      },
+      events: s.events,
+    });
   }),
 );
 

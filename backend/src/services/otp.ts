@@ -1,6 +1,6 @@
 import dayjs from 'dayjs';
 import type { OtpPurpose } from '@prisma/client';
-import { env } from '../config/env.js';
+import { env, isTest } from '../config/env.js';
 import { prisma } from '../lib/prisma.js';
 import { badRequest, HttpError, tooMany } from '../lib/errors.js';
 import { randomDigits, sha256 } from '../lib/utils.js';
@@ -10,13 +10,20 @@ import { sendWhatsAppOtp, whatsappConfigured } from './whatsapp.js';
 const OTP_LENGTH = 4; // the customer app renders a 4-digit OTP field
 const MAX_ATTEMPTS = 5;
 const DEV_OTP = '1234';
+/**
+ * Codes per 10 minutes per number and purpose. Effectively off under test for
+ * the same reason the HTTP auth limiter is: the suite re-uses seeded phone
+ * numbers, so a second run inside ten minutes would otherwise fail on the
+ * throttle rather than on anything real.
+ */
+const MAX_CODES_PER_WINDOW = isTest ? 10_000 : 3;
 
 export async function requestOtp(phone: string, purpose: OtpPurpose) {
   // throttle: max 3 active codes per 10 minutes per phone/purpose
   const recent = await prisma.otpCode.count({
     where: { phone, purpose, createdAt: { gte: dayjs().subtract(10, 'minute').toDate() } },
   });
-  if (recent >= 3) throw tooMany('Too many OTP requests. Please wait a few minutes.');
+  if (recent >= MAX_CODES_PER_WINDOW) throw tooMany('Too many OTP requests. Please wait a few minutes.');
 
   // invalidate older codes
   await prisma.otpCode.updateMany({
@@ -55,6 +62,27 @@ export async function requestOtp(phone: string, purpose: OtpPurpose) {
     // Only exposed in dev mode so the apps can be exercised without a gateway.
     ...(env.OTP_DEV_MODE ? { devOtp: code } : {}),
   };
+}
+
+/**
+ * A reset code for an email address. Codes are keyed `email:<address>` so they
+ * share the same store and throttling as phone codes, but nothing is sent here
+ * - the plain code is handed back so the caller can put it in an email. It is
+ * deliberately never part of an HTTP response.
+ */
+export async function requestEmailOtp(email: string, purpose: OtpPurpose): Promise<{ code: string; expiresInSeconds: number }> {
+  const key = `email:${email.toLowerCase()}`;
+  const recent = await prisma.otpCode.count({
+    where: { phone: key, purpose, createdAt: { gte: dayjs().subtract(10, 'minute').toDate() } },
+  });
+  if (recent >= MAX_CODES_PER_WINDOW) throw tooMany('Too many reset requests. Please wait a few minutes.');
+
+  await prisma.otpCode.updateMany({ where: { phone: key, purpose, consumedAt: null }, data: { consumedAt: new Date() } });
+
+  const code = env.OTP_DEV_MODE ? DEV_OTP : randomDigits(OTP_LENGTH);
+  const expiresAt = dayjs().add(env.OTP_TTL_SECONDS, 'second').toDate();
+  await prisma.otpCode.create({ data: { phone: key, purpose, codeHash: sha256(code), expiresAt } });
+  return { code, expiresInSeconds: env.OTP_TTL_SECONDS };
 }
 
 export async function verifyOtp(phone: string, code: string, purpose: OtpPurpose): Promise<void> {

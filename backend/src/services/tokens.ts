@@ -10,6 +10,8 @@ export interface AccessTokenPayload {
   sub: string;
   role: Role;
   name: string;
+  /** set by jsonwebtoken on sign; whole seconds. Used for the session cutoff. */
+  iat?: number;
 }
 
 export function signAccessToken(payload: AccessTokenPayload): string {
@@ -60,6 +62,17 @@ export async function revokeRefreshToken(refreshToken: string) {
   });
 }
 
+/**
+ * Sign every device out. Refresh tokens are revoked in the table, and
+ * `sessionsValidFrom` closes the window where an already-issued access token
+ * (valid for JWT_ACCESS_TTL) would otherwise keep working - which matters most
+ * on a password reset, where the point is to lock someone else out now.
+ *
+ * Truncated to the second because a JWT `iat` is whole seconds: without this a
+ * token minted in the same second as the revocation would refuse itself.
+ */
 export async function revokeAllUserTokens(userId: string) {
+  const cutoff = new Date(Math.floor(Date.now() / 1000) * 1000);
   await prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+  await prisma.user.update({ where: { id: userId }, data: { sessionsValidFrom: cutoff } });
 }

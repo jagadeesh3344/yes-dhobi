@@ -41,6 +41,61 @@ catalogRouter.get(
   }),
 );
 
+/**
+ * One search box over the whole catalogue, for the customer app's home-screen
+ * search bar. Matches service names, item names and service descriptions, and
+ * returns both levels so the app can show "Services" and "Items" sections and
+ * deep-link straight into a service.
+ */
+catalogRouter.get(
+  '/search',
+  asyncHandler(async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (q.length < 2) {
+      res.json({ query: q, services: [], items: [], total: 0 });
+      return;
+    }
+    const like = { contains: q, mode: 'insensitive' as const };
+    const [services, items] = await Promise.all([
+      prisma.serviceCategory.findMany({
+        where: { isActive: true, OR: [{ name: like }, { description: like }, { code: like }] },
+        orderBy: { sortOrder: 'asc' },
+        include: { items: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } } },
+        take: 10,
+      }),
+      prisma.catalogItem.findMany({
+        where: { isActive: true, OR: [{ name: like }, { serviceCategory: { name: like } }] },
+        orderBy: [{ serviceCategoryId: 'asc' }, { sortOrder: 'asc' }],
+        include: { serviceCategory: { select: { id: true, code: true, name: true } } },
+        take: 30,
+      }),
+    ]);
+
+    res.json({
+      query: q,
+      services: services.map((s) => ({
+        id: s.id,
+        code: s.code,
+        name: s.name,
+        description: s.description,
+        iconName: s.iconName,
+        rateUnit: s.rateUnit,
+        fromPrice: s.items.length ? Math.min(...s.items.map((i) => Number(i.price))) : Number(s.basePrice),
+        itemCount: s.items.length,
+      })),
+      items: items.map((i) => ({
+        id: i.id,
+        code: i.code,
+        name: i.name,
+        price: i.price,
+        unit: i.unit,
+        service: i.serviceCategory,
+      })),
+      total: services.length + items.length,
+    });
+  }),
+);
+
 /** Active coupons shown on the customer home screen ("Available Coupons"). */
 catalogRouter.get(
   '/promotions',

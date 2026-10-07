@@ -8,7 +8,7 @@ import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, parseBody } from '../../lib/http.js';
 import { badRequest, conflict, forbidden, HttpError, notFound, unauthorized } from '../../lib/errors.js';
 import { normalizePhone, referralCode } from '../../lib/utils.js';
-import { requestOtp, verifyOtp } from '../../services/otp.js';
+import { requestEmailOtp, requestOtp, verifyOtp } from '../../services/otp.js';
 import { issueTokens, revokeAllUserTokens, revokeRefreshToken, rotateRefreshToken } from '../../services/tokens.js';
 import { requireAuth } from '../../middleware/auth.js';
 import { authLimiter } from '../../middleware/rateLimit.js';
@@ -305,14 +305,47 @@ authRouter.post(
   }),
 );
 
-// Forgot password: OTP to registered mobile, then reset.
+/**
+ * Forgot password for riders and partners. The code goes to whichever channel
+ * they identified themselves with: `phone` -> SMS/WhatsApp, `email` -> email.
+ * Exactly one of the two is required.
+ *
+ * Email replies are deliberately vague about whether the account exists; the
+ * phone path keeps its 404 because the apps show "no account for this number"
+ * on the login screen.
+ */
+const forgotSchema = z
+  .object({ phone: phoneSchema.optional(), email: z.string().email().optional() })
+  .refine((v) => Boolean(v.phone) !== Boolean(v.email), { message: 'Provide either a mobile number or an email address' });
+
 authRouter.post(
   '/:role(rider|vendor)/forgot-password',
   authLimiter,
   asyncHandler(async (req, res) => {
     const role = req.params.role!.toUpperCase() as Role;
-    const { phone } = parseBody(z.object({ phone: phoneSchema }), req.body);
-    const normalized = normalizePhone(phone);
+    const body = parseBody(forgotSchema, req.body);
+
+    if (body.email) {
+      const email = body.email.toLowerCase();
+      const user = await prisma.user.findUnique({ where: { email_role: { email, role } } });
+      if (user) {
+        const { code, expiresInSeconds } = await requestEmailOtp(email, 'PASSWORD_RESET');
+        const minutes = Math.round(expiresInSeconds / 60);
+        await mailer.send(
+          email,
+          'Reset your Yes Dhobi password',
+          `Hi ${user.name},\n\nYour password reset code is ${code}. It expires in ${minutes} minutes.\n\nIf you did not ask for this, you can ignore this email.\n\n- Yes Dhobi`,
+        );
+      }
+      res.json({
+        channel: 'email',
+        message: 'If that email is registered, a reset code is on its way.',
+        expiresInSeconds: env.OTP_TTL_SECONDS,
+      });
+      return;
+    }
+
+    const normalized = normalizePhone(body.phone!);
     const user = await prisma.user.findUnique({ where: { phone_role: { phone: normalized, role } } });
     if (!user) throw notFound('Account');
     const result = await requestOtp(normalized, 'PASSWORD_RESET');
@@ -320,17 +353,36 @@ authRouter.post(
   }),
 );
 
+const resetSchema = z
+  .object({
+    phone: phoneSchema.optional(),
+    email: z.string().email().optional(),
+    otp: z.string().min(4).max(6),
+    newPassword: passwordSchema,
+  })
+  .refine((v) => Boolean(v.phone) !== Boolean(v.email), { message: 'Provide either a mobile number or an email address' });
+
 authRouter.post(
   '/:role(rider|vendor)/reset-password',
   authLimiter,
   asyncHandler(async (req, res) => {
     const role = req.params.role!.toUpperCase() as Role;
-    const body = parseBody(z.object({ phone: phoneSchema, otp: z.string().min(4).max(6), newPassword: passwordSchema }), req.body);
-    const phone = normalizePhone(body.phone);
-    const user = await prisma.user.findUnique({ where: { phone_role: { phone, role } } });
+    const body = parseBody(resetSchema, req.body);
+
+    const { user, otpKey } = body.email
+      ? await (async () => {
+          const email = body.email!.toLowerCase();
+          return { user: await prisma.user.findUnique({ where: { email_role: { email, role } } }), otpKey: `email:${email}` };
+        })()
+      : await (async () => {
+          const phone = normalizePhone(body.phone!);
+          return { user: await prisma.user.findUnique({ where: { phone_role: { phone, role } } }), otpKey: phone };
+        })();
+
     if (!user) throw notFound('Account');
-    await verifyOtp(phone, body.otp, 'PASSWORD_RESET');
+    await verifyOtp(otpKey, body.otp, 'PASSWORD_RESET');
     await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(body.newPassword, 10) } });
+    // every device is signed out, so a stolen session cannot outlive the reset
     await revokeAllUserTokens(user.id);
     res.json({ message: 'Password updated. Please login with your new password.' });
   }),
@@ -362,9 +414,13 @@ authRouter.post(
     const user = await prisma.user.findUnique({ where: { email_role: { email: email.toLowerCase(), role: 'ADMIN' } } });
     // do not reveal whether the account exists
     if (user) {
-      const result = await requestOtp(`email:${email.toLowerCase()}`, 'PASSWORD_RESET');
-      await mailer.send(email, 'Yes Dhobi admin password reset', `Your reset code is ${result.devOtp ?? '(sent by SMS provider)'} and expires in ${Math.round(result.expiresInSeconds / 60)} minutes.`);
-      res.json({ message: 'If that email belongs to an admin, a reset code has been sent.', ...(result.devOtp ? { devOtp: result.devOtp } : {}) });
+      const { code, expiresInSeconds } = await requestEmailOtp(email, 'PASSWORD_RESET');
+      await mailer.send(
+        email,
+        'Yes Dhobi admin password reset',
+        `Your reset code is ${code} and expires in ${Math.round(expiresInSeconds / 60)} minutes.`,
+      );
+      res.json({ message: 'If that email belongs to an admin, a reset code has been sent.', ...(env.OTP_DEV_MODE ? { devOtp: code } : {}) });
       return;
     }
     res.json({ message: 'If that email belongs to an admin, a reset code has been sent.' });

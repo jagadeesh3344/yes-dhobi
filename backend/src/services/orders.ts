@@ -78,8 +78,8 @@ export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
 export const orderInclude = {
   customer: { include: { user: { select: { id: true, name: true, phone: true, email: true } } } },
   vendor: { select: { id: true, shopName: true, ownerName: true, shopAddress: true, latitude: true, longitude: true, rating: true, userId: true, user: { select: { phone: true } } } },
-  pickupRider: { select: { id: true, userId: true, rating: true, vehicleType: true, vehicleNumber: true, currentLat: true, currentLng: true, user: { select: { name: true, phone: true } } } },
-  deliveryRider: { select: { id: true, userId: true, rating: true, vehicleType: true, vehicleNumber: true, currentLat: true, currentLng: true, user: { select: { name: true, phone: true } } } },
+  pickupRider: { select: { id: true, userId: true, rating: true, vehicleType: true, vehicleNumber: true, currentLat: true, currentLng: true, lastLocationAt: true, user: { select: { name: true, phone: true } } } },
+  deliveryRider: { select: { id: true, userId: true, rating: true, vehicleType: true, vehicleNumber: true, currentLat: true, currentLng: true, lastLocationAt: true, user: { select: { name: true, phone: true } } } },
   items: true,
   events: { orderBy: { createdAt: 'asc' as const } },
   zone: true,
@@ -98,6 +98,19 @@ export async function loadOrder(idOrNumber: string, client: Tx | typeof prisma =
 
 type Viewer = 'customer' | 'rider' | 'vendor' | 'admin';
 
+/**
+ * The customer may cancel only until a rider has been allocated. Once a rider
+ * is on the way the app hides the button and support has to step in, so the
+ * rider is never sent to a doorstep for an order that vanishes under them.
+ */
+export function cancellation(o: FullOrder) {
+  if (o.status === 'CANCELLED') return { canCancel: false, reason: 'This order is already cancelled' };
+  if (o.status === 'DELIVERED') return { canCancel: false, reason: 'This order has been delivered' };
+  if (o.pickupRiderId) return { canCancel: false, reason: 'A rider has been allocated. Please contact support to cancel.' };
+  if (o.status !== 'PENDING_PICKUP') return { canCancel: false, reason: 'This order can no longer be cancelled online. Please contact support.' };
+  return { canCancel: true as const, reason: null };
+}
+
 function riderView(r: FullOrder['pickupRider']) {
   if (!r) return null;
   return {
@@ -110,6 +123,7 @@ function riderView(r: FullOrder['pickupRider']) {
     vehicleNumber: r.vehicleNumber,
     currentLat: r.currentLat,
     currentLng: r.currentLng,
+    lastLocationAt: r.lastLocationAt,
   };
 }
 
@@ -160,6 +174,9 @@ export function serializeOrder(o: FullOrder, viewer: Viewer) {
     isExpress: o.isExpress,
     deliveryEta: o.deliveryEta,
     pickedUpAt: o.pickedUpAt,
+    // rider tapped "Arrived at location"
+    pickupArrivedAt: o.pickupArrivedAt,
+    deliveryArrivedAt: o.deliveryArrivedAt,
     deliveredAt: o.deliveredAt,
     cancelledAt: o.cancelledAt,
     cancelReason: o.cancelReason,
@@ -190,12 +207,17 @@ export function serializeOrder(o: FullOrder, viewer: Viewer) {
   };
 
   switch (viewer) {
-    case 'customer':
+    case 'customer': {
+      const c = cancellation(o);
       return {
         ...base,
         otps: { pickup: o.customerPickupOtp, delivery: o.customerDeliveryOtp },
         tracking: trackingSteps(o.status),
+        // the app hides the Cancel button when this is false
+        canCancel: c.canCancel,
+        cancelBlockedReason: c.reason,
       };
+    }
     case 'vendor':
       return {
         ...base,

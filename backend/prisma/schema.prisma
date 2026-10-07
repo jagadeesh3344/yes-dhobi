@@ -40,6 +40,10 @@ model User {
   avatarUrl    String?
   status       UserStatus @default(ACTIVE)
   lastLoginAt  DateTime?
+  /// Access tokens issued before this instant are refused. Set when every
+  /// session is revoked (password reset, suspension) so the short-lived JWT
+  /// cannot outlive the revocation.
+  sessionsValidFrom DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -53,6 +57,7 @@ model User {
   assignedTickets       SupportTicket[] @relation("TicketAssignee")
   ticketMessages        TicketMessage[]
   orderEvents           OrderEvent[]
+  orderMessages         OrderMessage[]
   verifications         Verification[]  @relation("VerificationSubject")
   reviewedVerifications Verification[]  @relation("VerificationReviewer")
 
@@ -511,6 +516,9 @@ model Order {
   vendorDropOtp       String
   vendorHandoverOtp   String
   customerDeliveryOtp String
+  // rider tapped "Arrived at location" (one per leg)
+  pickupArrivedAt     DateTime?
+  deliveryArrivedAt   DateTime?
   // feedback
   rating              Int?
   ratingComment       String?
@@ -534,6 +542,7 @@ model Order {
   ledgerEntries  LedgerEntry[]
   tickets        SupportTicket[]
   redemptions    PromotionRedemption[]
+  messages       OrderMessage[]
 
   @@index([customerId, createdAt])
   @@index([vendorId, status])
@@ -574,6 +583,35 @@ model OrderEvent {
   actor User? @relation(fields: [actorUserId], references: [id])
 
   @@index([orderId, createdAt])
+}
+
+/// Who is talking in an order chat. CUSTOMER<->RIDER, CUSTOMER<->VENDOR and
+/// RIDER<->VENDOR each get their own thread, keyed by the pair.
+enum ChatParty {
+  CUSTOMER
+  RIDER
+  VENDOR
+  ADMIN
+}
+
+/// One chat message on an order. `thread` is the sorted pair of parties, so a
+/// customer only ever reads the CUSTOMER_RIDER and CUSTOMER_VENDOR threads and
+/// never the RIDER_VENDOR one.
+model OrderMessage {
+  id           String    @id @default(cuid())
+  orderId      String
+  thread       String
+  senderRole   ChatParty
+  senderUserId String
+  senderName   String
+  body         String
+  readAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  order  Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sender User  @relation(fields: [senderUserId], references: [id])
+
+  @@index([orderId, thread, createdAt])
 }
 
 enum RequestLeg {

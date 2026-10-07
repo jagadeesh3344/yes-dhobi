@@ -258,6 +258,51 @@ These are covered by automated tests (`npm test`, file `tests/dispatch-cascade.t
 | W9 | Rider learns the drop-off | A partner accepts | The rider's order detail now shows the shop's name and address (socket event `order:dropoff_assigned`) | |
 | W10 | All partners decline | Every partner declines | Admin gets "Laundry partner needed"; `POST /admin/orders/:id/assign-vendor` still works and sets that partner's commission | |
 
+### 10.1a The customer and rider changes from the feedback list
+
+Covered by automated tests (`npm test`, file `tests/client-feedback.test.ts`) and
+by `python scripts/smoke-test.py <API address>`. To check them by hand:
+
+| ID | Test | Steps | Expected | Result |
+| --- | --- | --- | --- | --- |
+| F1 | Search bar | `GET /catalog/search?q=wash` | Both `services` and `items` come back; `total` is their sum | |
+| F2 | Search needs 2 letters | `GET /catalog/search?q=a` | `total: 0` — the box stays quiet instead of listing everything | |
+| F3 | Address search switch | `GET /geo/config` | `searchEnabled: true` once `AwsLocationApiKey` is set (DEPLOY.md 11.5), `false` before that | |
+| F4 | Address suggestions | `GET /geo/autocomplete?q=hsr layout&lat=12.91&lng=77.64` | A list of real Bangalore addresses, nearest first. **503 with code `PLACES_NOT_CONFIGURED`** if the key is not set yet — that is the expected answer, and the app falls back to typing the address | |
+| F5 | Suggestion → pin | `GET /geo/place/:placeId` using a `placeId` from F4 | `lat`, `lng`, `pincode`, `city` for the map pin | |
+| F6 | Pin dragged | `GET /geo/reverse?lat=&lng=` | The address at that exact point | |
+| F7 | Do we deliver there? | `GET /geo/serviceability?lat=&lng=&city=Bangalore` | `serviceable: true/false`; when false, a message naming the nearest service area | |
+| F8 | Cancel is offered early | Place an order, then `GET /orders/:id` **before** any rider accepts | `canCancel: true` — the app shows the Cancel button | |
+| F9 | Cancel works instantly | `POST /orders/:id/cancel` | Status is `CANCELLED` straight away, in the response and in the order list | |
+| F10 | Cancel disappears | Have a rider accept, then `GET /orders/:id` | `canCancel: false` and `cancelBlockedReason` explains why. The app must hide the button | |
+| F11 | Cancel is enforced | `POST /orders/:id/cancel` on that same order | 422 — the rule is enforced by the server, not just the button | |
+| F12 | Cancelling stops the search | Cancel an order that has a live rider offer | The offer disappears from every rider's *Open requests* | |
+| F13 | Live map | Rider accepts, then `POST /riders/me/location`, then `GET /orders/:id/track` | `map.live: true`, `map.riderPosition`, `map.customer`, `map.etaMinutes`. Repeat the location post and the position moves | |
+| F14 | Arrived at location | `POST /riders/me/orders/:id/arrived` | `arrivedAt` is set; the customer gets a notification; the order timeline shows `RIDER_ARRIVED`; `track` shows `map.riderArrived: true` | |
+| F15 | Arrived twice | Call F14 again | 200 with `alreadyMarked: true`, and only **one** timeline entry | |
+| F16 | Arrived by the wrong rider | Call F14 as a rider who is not on the order | 404 | |
+| F17 | History includes refusals | Decline an offer, then `GET /riders/me/requests/history?status=rejected` | The declined offer is listed, with the real order attached, labelled `Declined` | |
+| F18 | Missed offers | Let an offer time out, then `GET /riders/me/requests/history?status=expired` | Listed with `statusLabel: Missed` | |
+| F19 | No re-offer loop | All riders decline an order, then ask an admin to restart with `POST /admin/orders/:id/dispatch {"includeRefused": false}` | `ridersNotified: 0` — nobody who declined is asked again, so the order cannot bounce between the same riders | |
+| F20 | Admin override | Same, but `POST /admin/orders/:id/dispatch {"leg": "PICKUP"}` (the default) | `ridersNotified` > 0 — a deliberate admin retry may give everyone another go | |
+| F21 | Rejected rider is locked out | Admin rejects a rider's KYC, then as that rider `GET /riders/me/onboarding` | `rejected: true`, `canWork: false`, `message: "Your proposal has been rejected. Please try again after 24 hours."`, and `canReapplyAt` ~24 h ahead | |
+| F22 | Rejected rider cannot work | That rider calls `POST /riders/me/availability {"availability":"ONLINE"}` | 403 with the same message. They receive no offers | |
+| F23 | Re-apply is blocked for 24 h | That rider calls `PUT /riders/me/documents` | 403 until 24 hours have passed since the rejection | |
+| F24 | Forgot password by email | `POST /auth/rider/forgot-password {"email": "..."}` | 200, `channel: "email"`, and a code arrives by email. The code is **never** in the HTTP response | |
+| F25 | Reset completes | `POST /auth/rider/reset-password {"email", "otp", "newPassword"}` | 200; the new password logs in, the old one gives 401, and tokens from before the reset stop working | |
+| F26 | Call the other party | On a live order, `GET /chat/:orderId/contacts` as the customer and as the rider | Each sees the other's real number with `callable: true`. The app dials it with `tel:` | |
+| F27 | Chat | `POST /chat/:orderId/rider {"body":"Gate code 4521"}` as the customer | The rider reads it at `GET /chat/:orderId/customer`; socket event `chat:message` fires | |
+| F28 | Threads stay apart | Rider messages the shop, then the customer calls `GET /chat/:orderId` | The customer never sees the `RIDER_VENDOR` thread or its text | |
+| F29 | Outsiders are refused | Another customer calls `GET /chat/:orderId/contacts` | 404 | |
+| F30 | Contact closes after delivery | Complete the order, then `GET /chat/:orderId/contacts` | `callable: false`; sending gives 422, but the old conversation is still readable for support | |
+
+**Note on the offer timer.** The window is **15 seconds** (the client's later
+instruction), not the 45 seconds in the original feedback note. It is the
+`PickupRequestTtlSeconds` deploy parameter if you want to change it. The server
+expires an unanswered offer by itself and passes it on within ~3 seconds; the
+rider app must close the card when its own countdown reaches zero rather than
+leaving a Decline button on screen.
+
 ### 10.2 Permissions and limits
 
 | ID | Test | Expected | Result |

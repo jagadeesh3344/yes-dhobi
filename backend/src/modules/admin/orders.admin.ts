@@ -346,21 +346,23 @@ adminOrdersRouter.post(
 adminOrdersRouter.post(
   '/:id/dispatch',
   asyncHandler(async (req, res) => {
-    const { leg, riderIds, vendorIds } = parseBody(
+    const { leg, riderIds, vendorIds, includeRefused } = parseBody(
       z.object({
         leg: z.enum(['PICKUP', 'DELIVERY', 'VENDOR']).default('PICKUP'),
         riderIds: z.array(z.string()).optional(),
         vendorIds: z.array(z.string()).optional(),
+        /** false re-runs the search but keeps skipping anyone who already declined */
+        includeRefused: z.boolean().default(true),
       }),
       req.body ?? {},
     );
     const order = await loadOrder(req.params.id!);
     if (leg === 'VENDOR') {
-      const partnersNotified = await startVendorDispatch(order.id, { vendorIds });
+      const partnersNotified = await startVendorDispatch(order.id, { vendorIds, includeRefused });
       res.json({ partnersNotified });
       return;
     }
-    const ridersNotified = await startRiderDispatch(order.id, leg, { riderIds });
+    const ridersNotified = await startRiderDispatch(order.id, leg, { riderIds, includeRefused });
     res.json({ ridersNotified });
   }),
 );

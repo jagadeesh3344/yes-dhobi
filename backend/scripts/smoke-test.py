@@ -106,6 +106,33 @@ check("active coupons are listed", st == 200 and any(p["code"] == "FIRSTORDER" f
 st, q = call("POST", "/orders/quote", {"items": [{"code": "wi_1", "quantity": 2}, {"code": "wf_5", "quantity": 1}], "promoCode": "FIRSTORDER"}, CT)
 check("quote: 2x40 + 1x120 = 200, -20% = 160", st == 200 and q.get("subtotal") == 200 and q.get("discount") == 40 and q.get("total") == 160, q.get("total"))
 
+# -- customer home-screen search bar
+st, srch = call("GET", "/catalog/search?q=wash", None, CT)
+check("search bar finds services and items in one call", st == 200 and srch.get("total", 0) > 0,
+      "%s services, %s items" % (len(srch.get("services", [])), len(srch.get("items", []))))
+st, srch1 = call("GET", "/catalog/search?q=a", None, CT)
+check("search ignores a single character", st == 200 and srch1.get("total") == 0)
+
+# -- address search / map pin (needs AWS_LOCATION_API_KEY; 503 is a valid answer)
+st, gcfg = call("GET", "/geo/config")
+check("address-search switch is readable", st == 200 and "searchEnabled" in gcfg, gcfg.get("searchEnabled"))
+GEO_ON = bool(gcfg.get("searchEnabled"))
+st, ac = call("GET", "/geo/autocomplete?q=hsr%20layout&lat=12.9121&lng=77.6446", None, CT)
+if GEO_ON:
+    check("address autocomplete returns suggestions", st == 200 and len(ac.get("data", [])) > 0, len(ac.get("data", [])))
+    first = (ac.get("data") or [{}])[0]
+    if first.get("placeId"):
+        st, pl = call("GET", "/geo/place/%s" % first["placeId"], None, CT)
+        check("tapping a suggestion gives coordinates for the pin", st == 200 and pl.get("lat") and pl.get("lng"),
+              (pl.get("lat"), pl.get("lng")))
+    st, rv = call("GET", "/geo/reverse?lat=12.9121&lng=77.6446", None, CT)
+    check("dragging the pin gives back an address", st == 200 and bool(rv.get("label")), rv.get("label"))
+else:
+    check("address search says plainly that it is not configured yet", st == 503,
+          "set AwsLocationApiKey to switch it on (DEPLOY.md 11.5)")
+st, serv = call("GET", "/geo/serviceability?lat=12.9121&lng=77.6446&city=Bangalore", None, CT)
+check("serviceability check answers for a dropped pin", st == 200 and "serviceable" in serv, serv.get("serviceable"))
+
 st, badcoupon = call("POST", "/orders/validate-coupon", {"code": "FLAT100", "items": [{"code": "wi_1", "quantity": 1}]}, CT)
 check("coupon below minimum order is refused", st == 422, badcoupon.get("message"))
 
@@ -148,6 +175,31 @@ second_req = next(x for x in offers2["9876543211"] if x["orderId"] == OID)
 st, accepted = call("POST", "/riders/me/requests/%s/accept" % second_req["requestId"], {}, rider_tok["9876543211"])
 check("rider 2 accepts -> order ASSIGNED", st == 200 and accepted.get("status") == "ASSIGNED", accepted.get("statusLabel"))
 
+# -- the Cancel button must disappear the moment a rider is allocated
+st, aftassign = call("GET", "/orders/%s" % OID, None, CT)
+check("Cancel button is hidden once a rider is allocated", aftassign.get("canCancel") is False,
+      aftassign.get("cancelBlockedReason"))
+st, nocancel = call("POST", "/orders/%s/cancel" % OID, {}, CT)
+check("and the API refuses cancellation too, not just the button", nocancel is not None and st == 422, st)
+
+# -- "Arrived at location"
+st, arr = call("POST", "/riders/me/orders/%s/arrived" % OID, {}, rider_tok["9876543211"])
+check("rider can mark 'Arrived at location'", st == 200 and arr.get("leg") == "PICKUP", arr.get("arrivedAt"))
+st, arr2 = call("POST", "/riders/me/orders/%s/arrived" % OID, {}, rider_tok["9876543211"])
+check("tapping Arrived twice is harmless", st == 200 and arr2.get("alreadyMarked") is True)
+st, arr_other = call("POST", "/riders/me/orders/%s/arrived" % OID, {}, rider_tok["9876543212"])
+check("another rider cannot mark arrival on someone else's order", st == 404, st)
+
+# -- live tracking map
+st, _ = call("POST", "/riders/me/location", {"lat": 12.9131, "lng": 77.6449, "orderId": OID}, rider_tok["9876543211"])
+st, trk = call("GET", "/orders/%s/track" % OID, None, CT)
+mp = trk.get("map") or {}
+check("tracking screen gets a live rider position", st == 200 and mp.get("live") is True and mp.get("riderPosition"),
+      mp.get("riderPosition"))
+check("tracking screen gets the customer pin and an ETA", bool(mp.get("customer")) and (mp.get("etaMinutes") or 0) > 0,
+      mp.get("etaMinutes"))
+check("tracking screen reports the rider has arrived", mp.get("riderArrived") is True)
+
 # ---------------------------------------------------------------- vendor waterfall
 section("LAUNDRY PARTNER WATERFALL (after rider accepted)")
 time.sleep(1.5)
@@ -177,6 +229,29 @@ check("rider now sees the drop-off address", (riderview.get("vendor") or {}).get
 
 st, declined_vendor = call("POST", "/vendors/me/orders/%s/accept" % OID, {}, vendor_tok["9123456789"])
 check("the partner who declined cannot take it later", st in (404, 409), st)
+
+# ---------------------------------------------------------------- call + chat
+section("CALL AND CHAT BETWEEN THE PARTIES")
+st, cc = call("GET", "/chat/%s/contacts" % OID, None, CT)
+rider_contact = next((c for c in cc.get("contacts", []) if c["party"] == "RIDER"), {})
+check("customer gets the rider's number to call", st == 200 and rider_contact.get("callable") is True
+      and str(rider_contact.get("phone", "")).startswith("+91"), rider_contact.get("phone"))
+st, rc = call("GET", "/chat/%s/contacts" % OID, None, rider_tok["9876543211"])
+cust_contact = next((c for c in rc.get("contacts", []) if c["party"] == "CUSTOMER"), {})
+check("rider gets the customer's number to call", st == 200 and cust_contact.get("callable") is True
+      and str(cust_contact.get("phone", "")).startswith("+91"), cust_contact.get("phone"))
+
+st, sent = call("POST", "/chat/%s/rider" % OID, {"body": "Gate code is 4521"}, CT)
+check("customer can message the rider", st == 201)
+st, thread = call("GET", "/chat/%s/customer" % OID, None, rider_tok["9876543211"])
+check("rider reads that message", st == 200 and any(m["body"] == "Gate code is 4521" for m in thread.get("data", [])))
+st, _ = call("POST", "/chat/%s/vendor" % OID, {"body": "Reaching your shop in 10"}, rider_tok["9876543211"])
+st, mine = call("GET", "/chat/%s" % OID, None, CT)
+threads = [t["thread"] for t in mine.get("threads", [])]
+check("the rider/partner thread is hidden from the customer",
+      "RIDER_VENDOR" not in threads and "Reaching your shop in 10" not in json.dumps(mine), threads)
+st, empty = call("POST", "/chat/%s/rider" % OID, {"body": "   "}, CT)
+check("an empty message is refused", st == 400, st)
 
 # ---------------------------------------------------------------- OTP handoffs
 section("PICKUP AND DROP-OFF (OTP handoffs)")
@@ -290,6 +365,46 @@ if st == 201:
     st, seen = call("GET", "/support/tickets/%s" % tkt["id"], None, CT)
     check("customer sees the staff reply", any(m.get("isStaff") for m in seen.get("messages", [])))
 
+# ---------------------------------------------------------------- rider history
+section("RIDER ORDER HISTORY (real data, including refusals)")
+st, hist = call("GET", "/riders/me/requests/history?status=rejected", None, rider_tok["9876543210"])
+check("declined offers show up in the rider's history", st == 200 and len(hist.get("data", [])) > 0,
+      "%s row(s)" % len(hist.get("data", [])))
+if hist.get("data"):
+    row = hist["data"][0]
+    check("each history row carries the real order, not a placeholder",
+          bool((row.get("order") or {}).get("orderNumber")), (row.get("order") or {}).get("orderNumber"))
+    check("a refused offer is labelled Declined or Missed", row.get("statusLabel") in ("Declined", "Missed"),
+          row.get("statusLabel"))
+st, hist_all = call("GET", "/riders/me/requests/history?status=accepted", None, rider_tok["9876543211"])
+check("accepted offers are listed too", st == 200 and len(hist_all.get("data", [])) > 0)
+
+# ---------------------------------------------------------------- verification
+section("RIDER VERIFICATION VERDICT")
+st, onb = call("GET", "/riders/me/onboarding", None, rider_tok["9876543210"])
+check("rider can read the admin's verdict", st == 200 and "canWork" in onb and "rejected" in onb,
+      "%s / canWork=%s" % (onb.get("status"), onb.get("canWork")))
+check("an approved rider is allowed to work", onb.get("canWork") is True or onb.get("rejected") is True, onb.get("status"))
+
+# ---------------------------------------------------------------- forgot password
+section("FORGOT PASSWORD")
+st, fp = call("POST", "/auth/rider/forgot-password", {"email": "nobody-" + str(int(time.time())) + "@example.com"})
+check("forgot password accepts an email and does not leak accounts",
+      st == 200 and fp.get("channel") == "email" and "devOtp" not in fp and "code" not in fp, fp.get("message"))
+st, fpbad = call("POST", "/auth/rider/forgot-password", {})
+check("forgot password insists on an email or a phone", st == 400, st)
+
+section("SECURITY")
+st, closed = call("GET", "/chat/%s/contacts" % OID, None, CT)
+closed_rider = next((c for c in closed.get("contacts", []) if c["party"] == "RIDER"), {})
+check("calling is closed once the order is delivered", closed_rider.get("callable") is False,
+      closed_rider.get("note"))
+st, latemsg = call("POST", "/chat/%s/rider" % OID, {"body": "hello?"}, CT)
+check("and no new messages can be sent on a closed order", st == 422, st)
+st, oldthread = call("GET", "/chat/%s/rider" % OID, None, CT)
+check("but the past conversation is still readable", st == 200 and len(oldthread.get("data", [])) > 0,
+      "%s message(s)" % len(oldthread.get("data", [])))
+
 st, forb = call("GET", "/admin/orders", None, CT)
 check("customer token cannot read admin data", st == 403, st)
 st, unauth = call("GET", "/orders")
@@ -302,6 +417,8 @@ st, o2 = call("POST", "/orders", {"items": [{"code": "si_1", "quantity": 2}], "a
                                   "pickupDate": "2026-10-21", "pickupSlot": "8-10", "paymentMethod": "COD"}, CT)
 if st == 201:
     time.sleep(0.8)
+    st, pre = call("GET", "/orders/%s" % o2["id"], None, CT)
+    check("Cancel button is offered while no rider is allocated", pre.get("canCancel") is True)
     st, c2 = call("POST", "/orders/%s/cancel" % o2["id"], {"reason": "Changed my mind"}, CT)
     check("customer can cancel before pickup", st == 200 and c2.get("status") == "CANCELLED")
     time.sleep(0.5)

@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
 import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
+import { prisma } from '../lib/prisma.js';
 import { loadAuthUser, type AuthUser } from '../middleware/auth.js';
 
 /**
@@ -13,6 +14,20 @@ import { loadAuthUser, type AuthUser } from '../middleware/auth.js';
  */
 
 let io: Server | null = null;
+
+/** Is this user the customer, assigned rider, assigned partner, or an admin? */
+async function canSeeOrder(user: AuthUser, orderId: string): Promise<boolean> {
+  if (user.role === 'ADMIN') return true;
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { customerId: true, vendorId: true, pickupRiderId: true, deliveryRiderId: true },
+  });
+  if (!order) return false;
+  if (user.customerId && user.customerId === order.customerId) return true;
+  if (user.vendorId && user.vendorId === order.vendorId) return true;
+  if (user.riderId && (user.riderId === order.pickupRiderId || user.riderId === order.deliveryRiderId)) return true;
+  return false;
+}
 
 export function initSocket(server: HttpServer) {
   io = new Server(server, {
@@ -40,8 +55,16 @@ export function initSocket(server: HttpServer) {
     if (user.role === 'ADMIN') socket.join('admins');
     logger.debug({ userId: user.id, role: user.role }, 'socket connected');
 
-    socket.on('order:subscribe', (orderId: string) => {
-      if (typeof orderId === 'string') socket.join(`order:${orderId}`);
+    // Only parties on the order may listen in: the room carries rider positions
+    // and chat messages, so an unchecked join would leak both.
+    socket.on('order:subscribe', async (orderId: string) => {
+      if (typeof orderId !== 'string' || !orderId) return;
+      try {
+        if (await canSeeOrder(user, orderId)) socket.join(`order:${orderId}`);
+        else logger.warn({ userId: user.id, orderId }, 'socket: refused order subscription');
+      } catch (err) {
+        logger.warn({ err, userId: user.id, orderId }, 'socket: order subscription check failed');
+      }
     });
     socket.on('order:unsubscribe', (orderId: string) => {
       if (typeof orderId === 'string') socket.leave(`order:${orderId}`);

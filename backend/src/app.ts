@@ -9,6 +9,8 @@ import { apiLimiter } from './middleware/rateLimit.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { catalogRouter } from './modules/catalog/catalog.routes.js';
+import { geoRouter } from './modules/geo/geo.routes.js';
+import { chatRouter } from './modules/chat/chat.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { ordersRouter } from './modules/orders/orders.routes.js';
 import { ridersRouter } from './modules/riders/riders.routes.js';
@@ -88,6 +90,8 @@ export function createApp() {
 
   api.use('/auth', authRouter);
   api.use('/catalog', catalogRouter);
+  api.use('/geo', geoRouter);
+  api.use('/chat', chatRouter);
   api.use('/customers', customersRouter);
   api.use('/orders', ordersRouter);
   api.use('/riders', ridersRouter);

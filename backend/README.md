@@ -88,19 +88,23 @@ Today the app is UI-only (no `http` package). Add to `pubspec.yaml`: `http` (or 
 | `home_screen` recent/active orders, Reorder | `GET /orders?status=active`, `POST /orders/:id/reorder` |
 | `home_screen` Account → Edit Profile | `GET /customers/me`, `PATCH /customers/me` |
 | `home_screen` Refer & Earn | `GET /customers/me/referrals` (code + bonus from `GET /catalog/config`) |
-| `home_screen` search bar | `GET /catalog/items?q=` |
+| `home_screen` search bar | `GET /catalog/search?q=` → `{ services[], items[] }`, so the box can offer both. Needs 2+ characters |
 | `select_items_screen` (replaces `CartManager` catalog) | `GET /catalog/items` (codes `wf_1`, `wi_3`… are the same ids the app uses) |
 | `schedule_pickup_screen` / `order_scheduling_screen` | `GET /catalog/slots`, `GET /customers/me/addresses` |
 | `manage_addresses_screen` | `GET/POST /customers/me/addresses`, `PATCH/DELETE /customers/me/addresses/:id` |
+| Address search + map pin (Uber/Rapido style) | `GET /geo/config` (is search on?) → `GET /geo/autocomplete?q=&lat=&lng=` as they type → `GET /geo/place/:placeId` when they tap a result (gives `lat`/`lng`) → `GET /geo/reverse?lat=&lng=` on every pin drag → `GET /geo/serviceability?lat=&lng=` before Continue. Save the result with `POST /customers/me/addresses` |
+| Registration: ask for location instead of an address | skip the address fields at sign-up; after `verify-otp`, request OS location permission, reverse-geocode the fix and save it as the first address |
 | `order_summary_screen` bill, coupon, express toggle | `POST /orders/quote { items, promoCode, isExpress }`, `POST /orders/validate-coupon` |
 | `order_summary_screen` Place Order | `POST /orders { items, addressId, pickupDate, pickupSlot, isExpress, promoCode, paymentMethod: UPI/CARD/COD/WALLET, notes }` |
 | Pay online | `POST /payments/intent { orderId, method }` → gateway → `POST /payments/:id/confirm` |
 | `order_success_screen` | response of `POST /orders` (`orderNumber`, `deliveryEta`) |
-| `track_order_screen` | `GET /orders/:id/track` (`tracking[]`, `rider`, `otps.pickup/delivery`) + socket `order:subscribe`, events `order:updated`, `rider:location` |
+| `track_order_screen` live map | `GET /orders/:id/track` → `map.customer`, `map.riderPosition`, `map.vendor`, `map.etaMinutes`, `map.leg`, `map.riderArrived`, `map.live`. Draw once, then `order:subscribe` and follow `rider:location` (rider moving), `rider:arrived` and `order:updated` — do not poll |
+| `track_order_screen` Cancel button | show it only while `canCancel` is true; it goes false the moment a rider is allocated, and `cancelBlockedReason` says why. `POST /orders/:id/cancel` → status `CANCELLED` straight away |
 | `order_details_screen` Download Invoice | `GET /orders/:id/invoice` (JSON; render or convert to PDF in-app) |
 | `order_details_screen` rating | `POST /orders/:id/rate` |
 | Cancel order | `POST /orders/:id/cancel` |
 | Wallet | `GET /customers/me/wallet`, `POST /customers/me/wallet/topup` |
+| Call / chat the rider or the laundry partner | `GET /chat/:orderId/contacts` → per party `phone` + `callable` (dial `tel:` only when `callable`); `GET|POST /chat/:orderId/rider` and `/vendor`; `POST /chat/:orderId/rider/read`; socket `chat:message` |
 | `help_support_screen` FAQs / Call / WhatsApp / Live chat | `GET /support/faqs?q=`, `GET /support/channels`, `POST /support/tickets`, `POST /support/tickets/:id/messages` |
 | Notifications | `GET /notifications`, socket `notification:new`; push: `POST /auth/device-token` |
 
@@ -108,22 +112,27 @@ Today the app is UI-only (no `http` package). Add to `pubspec.yaml`: `http` (or 
 
 | Screen | Endpoint(s) |
 | --- | --- |
-| `rider_login_screen` | `POST /auth/rider/login { phone, password }`; Forgot → `POST /auth/rider/forgot-password`, `POST /auth/rider/reset-password` |
+| `rider_login_screen` | `POST /auth/rider/login { phone, password }` |
+| `rider_login_screen` Forgot password | `POST /auth/rider/forgot-password { email }` **or** `{ phone }` (exactly one), then `POST /auth/rider/reset-password { email\|phone, otp, newPassword }`. The email path mails a 4-digit code; resetting signs every device out |
+| Staying logged in | persist **both** `accessToken` and `refreshToken` to secure storage at login. On 401, call `POST /auth/refresh { refreshToken }`, store the new pair and retry once. Only clear storage on an explicit logout — the access token lasts 15 min, the refresh token 30 days, so backgrounding the app must never send the rider back to the login screen |
 | `rider_register_step1` | `POST /auth/rider/register { fullName, mobileNumber, email, password, dateOfBirth }` (returns token) |
 | `rider_register_step2` | `PUT /riders/me/vehicle { vehicleType: "Scooter", vehicleNumber, drivingLicenseNumber, drivingLicensePhoto }` |
-| `rider_register_step3` | `PUT /riders/me/documents { aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, bankAccountNumber, ifscCode, profilePhoto }` → status `UNDER_REVIEW` |
-| `application_review_screen` | `GET /riders/me/onboarding` (poll or socket `notification:new` when approved) |
+| `rider_register_step3` | `PUT /riders/me/documents { aadhaarFront, aadhaarBack, aadhaarNumber, panNumber, bankAccountNumber, ifscCode, profilePhoto }` → status `UNDER_REVIEW`. Capture these photos with the **camera only** — open the camera directly and do not offer the gallery picker |
+| `application_review_screen` | `GET /riders/me/onboarding` → `status`, `canWork`, `rejected`, `message`, `rejectionReason`, `canReapply`, `canReapplyAt`. Gate the app on `canWork`: when `rejected` is true show `message` ("Your proposal has been rejected. Please try again after 24 hours.") and keep the rider out of the working screens. Re-submitting documents is refused with 403 until `canReapply` turns true |
 | `identity_verification_*`, `front_camera_selfie`, `selfie_confirmation` | `POST /riders/me/selfie { image: dataUrl }` |
 | `rider_dashboard_screen` Go Online / Offline | `POST /riders/me/availability { availability }`; stats `GET /riders/me/dashboard` |
-| Incoming pickup requests (with countdown) | socket `pickup_request:new` / `pickup_request:expired`; `GET /riders/me/requests` (`remainingSeconds`) |
+| Incoming pickup requests (with countdown) | socket `pickup_request:new` / `pickup_request:expired`; `GET /riders/me/requests` (`remainingSeconds`, `expiresAt`). The offer is 15 s. **When the countdown hits zero, close the card yourself** — do not leave it on screen with a Decline button. The server has already expired it and moved on, so Accept would return 409; `pickup_request:expired` arrives for the same reason, and `GET /riders/me/requests` never returns an expired offer |
 | `order_request_screen` Accept / Reject & Next | `POST /riders/me/requests/:id/accept`, `/decline` |
 | `rider_order_details_screen`, Navigate | `GET /riders/me/orders/:id` (`pickup`, `dropoff` coords) |
+| "Arrived at location" button | `POST /riders/me/orders/:id/arrived` → `{ leg, arrivedAt }`. Safe to call twice (`alreadyMarked`). The customer gets a push and sees it on the tracking map; admins see a `RIDER_ARRIVED` event |
+| Call / chat the customer or the shop | `GET /chat/:orderId/contacts`; `GET\|POST /chat/:orderId/customer` and `/vendor`; socket `chat:message` |
 | `confirm_pickup_screen` (weigh / count load) | `POST /riders/me/orders/:id/weigh { weightKg, itemsCount, photo? }` |
 | `pickup_verification_screen` (customer OTP) | `POST /riders/me/orders/:id/confirm-pickup { otp }` |
 | `confirm_vendor_dropoff_screen` (vendor OTP) | `POST /riders/me/orders/:id/confirm-dropoff { otp }` |
 | Delivery leg: collect from vendor / deliver | `confirm-handover { otp }`, `confirm-delivery { otp, collectedCash }` |
 | Live location while on a job | `POST /riders/me/location { lat, lng }` every ~10 s |
-| `order_status_screen`, `order_history_screen` | `GET /riders/me/orders?status=active` / `history` |
+| `order_status_screen` | `GET /riders/me/orders?status=active` |
+| `order_history_screen` | `GET /riders/me/orders?status=history` for jobs they ran, **plus** `GET /riders/me/requests/history?status=all\|accepted\|declined\|expired\|rejected` for offers they turned down or missed (`statusLabel` is `Accepted` / `Declined` / `Missed`, each with the real order attached). Remove the simulated list — every row here comes from the database |
 | `rider_earnings_screen`, Withdraw | `GET /riders/me/earnings`, `POST /riders/me/payouts`, `GET /riders/me/payouts` |
 | `rider_profile_screen`, Logout | `GET /riders/me`, `PATCH /riders/me`, `POST /auth/logout` |
 
@@ -366,10 +375,15 @@ After the frontends are up, re-run the backend deploy with `CorsOrigins=` set to
 | `order:updated` | customer, vendor, riders on the order, admins, `order:{id}` subscribers |
 | `pickup_request:new`, `pickup_request:expired` | rider |
 | `rider:location`, `rider:availability` | admins; `order:{id}` room |
+| `rider:arrived` | `order:{id}` room (rider tapped "Arrived at location") |
+| `chat:message` | the recipient, the `order:{id}` room, admins |
 | `notification:new` | user |
 | `ticket:new`, `ticket:message` | admins / ticket owner |
 
 Client → server: `order:subscribe <orderId>`, `order:unsubscribe`, `zone:subscribe <zoneId>`.
+`order:subscribe` is access-checked: only the customer, the assigned riders, the
+assigned partner and admins are admitted to an order's room, because that room
+carries rider positions and chat messages.
 
 ---
 
@@ -377,7 +391,7 @@ Client → server: `order:subscribe <orderId>`, `order:unsubscribe`, `zone:subsc
 
 1. **Wire the frontends** (§3) – start with the vendor site (one-line URL change), then the admin panel `DataContext.tsx`, then the Flutter apps.
 2. **SMS** – switch to `SmsProvider=sns` after DLT registration (or implement MSG91 in `src/services/sms.ts`); set `OtpDevMode=false`.
-3. **Payment gateway** – Razorpay/PhonePe in `src/modules/payments/payments.routes.ts` (create provider order in `intent`, verify signature in `confirm`, handle `webhook`).
+3. **Address search** – create an Amazon Location Service API key and set `AwsLocationApiKey` (DEPLOY.md 11.5). The `/geo/*` endpoints are built and tested; they only need the key.
 4. **Push notifications** – FCM send in `src/services/notifications.ts` using stored `DeviceToken`s (socket delivery already works).
 5. **Email** – `MailProvider=ses` after verifying the sender in SES.
 6. **Google sign-in** – set `GOOGLE_CLIENT_ID`.

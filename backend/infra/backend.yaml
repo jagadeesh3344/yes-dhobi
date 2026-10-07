@@ -100,6 +100,15 @@ Parameters:
     Default: sms
     AllowedValues: [sms, whatsapp, whatsapp_then_sms]
     Description: WhatsApp needs no DLT registration, only a Meta-approved template
+  AwsLocationApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: >-
+      Amazon Location Service API key for address search on the customer app
+      (Places API v2). Leave blank to keep manual address entry. Create it under
+      Location Service > API keys with the geo-places:Autocomplete,
+      geo-places:GetPlace and geo-places:ReverseGeocode actions allowed.
   WhatsappPhoneNumberId:
     Type: String
     Default: ''
@@ -476,6 +485,7 @@ Resources:
             - { Name: SMS_PROVIDER, Value: !Ref SmsProvider }
             - { Name: SMS_SENDER_ID, Value: !Ref SmsSenderId }
             - { Name: OTP_CHANNEL, Value: !Ref OtpChannel }
+            - { Name: AWS_LOCATION_API_KEY, Value: !Ref AwsLocationApiKey }
             - { Name: WHATSAPP_PHONE_NUMBER_ID, Value: !Ref WhatsappPhoneNumberId }
             - { Name: WHATSAPP_ACCESS_TOKEN, Value: !Ref WhatsappAccessToken }
             - { Name: WHATSAPP_OTP_TEMPLATE, Value: !Ref WhatsappOtpTemplate }

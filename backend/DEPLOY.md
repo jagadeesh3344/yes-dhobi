@@ -324,6 +324,48 @@ What the backend does for you: creates the Razorpay order, verifies the checkout
 
 Fees: UPI has 0% MDR by RBI rule but Razorpay charges a ~2% platform fee; cards/netbanking/wallets are 2% + 18% GST. New merchants currently get 0% platform fee for 90 days or ₹5 lakh, whichever comes first.
 
+### 11.5 Address search and the map (Amazon Location Service)
+
+The customer app's "pick your exact location" screen - search an address, then
+drag the pin, the way Uber and Rapido do it - is built and waiting for one API
+key. Until you create it the search box stays hidden and customers type their
+address by hand exactly as before, so nothing breaks in the meantime.
+
+1. AWS console -> search **Location Service** -> **API keys** -> **Create API key**.
+2. Name it `yesdhobi-places`. Under **Resources / actions**, allow these three:
+   * `geo-places:Autocomplete`
+   * `geo-places:GetPlace`
+   * `geo-places:ReverseGeocode`
+3. Leave the expiry blank (or set a far-future date), create it, and **copy the key value**.
+4. Hand it to the backend:
+
+```bash
+cd ~/yesdhobi/yes-dhobi/backend && PARAMS="AwsLocationApiKey=<the key>" AWS_PROFILE=yesdhobi bash infra/deploy-backend.sh
+```
+
+5. Check it worked:
+
+```bash
+curl "<API address>/api/v1/geo/config"
+curl "<API address>/api/v1/geo/autocomplete?q=hsr%20layout"
+```
+
+The first must say `{"searchEnabled":true}`; the second must return a list of
+Bangalore addresses.
+
+**Create the key in the same region as the backend** (ap-southeast-2 unless you
+have moved to Mumbai). The backend calls `places.geo.<its own region>.amazonaws.com`,
+so a key issued in a different region comes back 403 and the endpoint reports
+"address search is misconfigured".
+
+**Cost.** Around US$4.75 per 1,000 autocomplete sessions and the same per 1,000
+stored geocodes; Places v2 has no free tier. One customer saving one address is
+a few autocomplete calls plus one stored lookup, so roughly half a US cent per
+address. Map tiles drawn by the app are billed separately, about US$0.04 per
+1,000 tiles.
+
+---
+
 ---
 
 ## Quick reference — the whole thing in 6 commands

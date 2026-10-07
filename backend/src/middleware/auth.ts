@@ -48,6 +48,7 @@ export async function loadAuthUser(token: string): Promise<AuthUser> {
       role: true,
       name: true,
       status: true,
+      sessionsValidFrom: true,
       customer: { select: { id: true } },
       rider: { select: { id: true } },
       vendor: { select: { id: true } },
@@ -55,6 +56,10 @@ export async function loadAuthUser(token: string): Promise<AuthUser> {
   });
   if (!user) throw unauthorized('Account no longer exists');
   if (user.status === 'SUSPENDED') throw forbidden('Your account has been suspended. Contact support.');
+  // the password was reset (or the account suspended) after this token was issued
+  if (user.sessionsValidFrom && payload.iat != null && payload.iat * 1000 < user.sessionsValidFrom.getTime()) {
+    throw unauthorized('Your session has ended. Please sign in again.');
+  }
   return {
     id: user.id,
     role: user.role,

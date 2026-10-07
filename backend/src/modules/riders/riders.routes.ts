@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import dayjs from 'dayjs';
-import type { OrderStatus, RiderVehicle } from '@prisma/client';
+import type { OrderStatus, PickupRequestStatus, RiderVehicle } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, paginated, parseBody, parsePagination, parseQuery } from '../../lib/http.js';
 import { badRequest, forbidden, notFound, unprocessable } from '../../lib/errors.js';
-import { compact, maskAccount } from '../../lib/utils.js';
+import { compact, maskAccount, toTitle } from '../../lib/utils.js';
 import { requireRider } from '../../middleware/auth.js';
 import { materializeDocuments } from '../../services/storage.js';
-import { notifyAdmins } from '../../services/notifications.js';
+import { notifyAdmins, notifyUser } from '../../services/notifications.js';
 import { addEvent, broadcastOrder, loadOrder, orderInclude, serializeOrder, transitionOrder } from '../../services/orders.js';
 import { acceptRequest, declineRequest, serializeRequest } from '../../services/dispatch.js';
 import { earningsSummary, partyBalance } from '../../services/ledger.js';
@@ -46,8 +46,28 @@ async function me(riderId: string) {
   return { ...rider, bankAccountNumber: maskAccount(rider.bankAccountNumber), aadhaarNumber: rider.aadhaarNumber ? `XXXX XXXX ${rider.aadhaarNumber.slice(-4)}` : null };
 }
 
+/** How long a rejected applicant must wait before re-submitting documents. */
+const REAPPLY_AFTER_HOURS = 24;
+const REJECTED_MESSAGE = 'Your proposal has been rejected. Please try again after 24 hours.';
+
 function assertApproved(status: string) {
+  if (status === 'REJECTED') throw forbidden(REJECTED_MESSAGE);
   if (status !== 'APPROVED') throw forbidden('Your application is still under review');
+}
+
+/**
+ * When a rejected rider may apply again, measured from the admin's decision.
+ * Returns null when they are free to re-submit now.
+ */
+async function reapplyBlockedUntil(riderId: string): Promise<Date | null> {
+  const last = await prisma.verification.findFirst({
+    where: { riderId, status: 'REJECTED' },
+    orderBy: { reviewedAt: 'desc' },
+    select: { reviewedAt: true },
+  });
+  if (!last?.reviewedAt) return null;
+  const until = dayjs(last.reviewedAt).add(REAPPLY_AFTER_HOURS, 'hour');
+  return until.isAfter(dayjs()) ? until.toDate() : null;
 }
 
 // ---- Profile & onboarding ----------------------------------------------------
@@ -119,6 +139,7 @@ ridersRouter.put(
     const rider = await prisma.rider.findUnique({ where: { id: req.user!.riderId }, include: { user: true } });
     if (!rider) throw notFound('Rider');
     if (rider.onboardingStatus === 'APPROVED') throw unprocessable('Your account is already approved');
+    if (rider.onboardingStatus === 'REJECTED' && (await reapplyBlockedUntil(rider.id))) throw forbidden(REJECTED_MESSAGE);
 
     const docs = await materializeDocuments(
       { aadhaarFront: body.aadhaarFront, aadhaarBack: body.aadhaarBack, selfie: body.selfie, profilePhoto: body.profilePhoto },
@@ -171,7 +192,26 @@ ridersRouter.get(
   asyncHandler(async (req, res) => {
     const rider = await prisma.rider.findUnique({ where: { id: req.user!.riderId }, include: { verifications: { orderBy: { submittedAt: 'desc' }, take: 1 } } });
     if (!rider) throw notFound('Rider');
-    res.json({ status: rider.onboardingStatus, latestVerification: rider.verifications[0] ?? null });
+    const latest = rider.verifications[0] ?? null;
+    const rejected = rider.onboardingStatus === 'REJECTED';
+    const blockedUntil = rejected ? await reapplyBlockedUntil(rider.id) : null;
+    res.json({
+      status: rider.onboardingStatus,
+      latestVerification: latest,
+      // the rider app gates the whole app on these fields
+      canWork: rider.onboardingStatus === 'APPROVED',
+      rejected,
+      message: rejected
+        ? REJECTED_MESSAGE
+        : rider.onboardingStatus === 'APPROVED'
+          ? 'You are verified. Go online to start receiving requests.'
+          : rider.onboardingStatus === 'UNDER_REVIEW'
+            ? 'Your documents are with our team for review.'
+            : 'Please finish your registration.',
+      rejectionReason: rejected ? (latest?.rejectionReason ?? null) : null,
+      canReapply: rejected ? !blockedUntil : false,
+      canReapplyAt: blockedUntil,
+    });
   }),
 );
 
@@ -282,6 +322,103 @@ ridersRouter.get(
   '/me/orders/:id',
   asyncHandler(async (req, res) => {
     res.json(serializeOrder(await riderOrder(req.params.id!, req.user!.riderId!), 'rider'));
+  }),
+);
+
+/**
+ * "Arrived at location". The rider taps this when they reach the doorstep (or
+ * the shop) so the customer and the admin panel stop wondering where they are.
+ * It is a timestamp, not an order status, so the state machine is untouched and
+ * the OTP handoff that follows is unchanged.
+ */
+ridersRouter.post(
+  '/me/orders/:id/arrived',
+  asyncHandler(async (req, res) => {
+    const riderId = req.user!.riderId!;
+    const order = await riderOrder(req.params.id!, riderId);
+    if (['DELIVERED', 'CANCELLED'].includes(order.status)) throw unprocessable(`Order is ${order.status.toLowerCase()}`);
+
+    // which leg is this rider on right now?
+    const leg = order.deliveryRiderId === riderId && ['READY', 'OUT_FOR_DELIVERY'].includes(order.status) ? 'DELIVERY' : 'PICKUP';
+    if (leg === 'PICKUP' && order.pickupRiderId !== riderId) throw forbidden('You are not the pickup rider for this order');
+    if (leg === 'PICKUP' && order.status !== 'ASSIGNED') throw unprocessable('You can only mark arrival before the pickup is confirmed');
+
+    const already = leg === 'PICKUP' ? order.pickupArrivedAt : order.deliveryArrivedAt;
+    if (already) {
+      res.json({ leg, arrivedAt: already, alreadyMarked: true });
+      return;
+    }
+
+    const now = new Date();
+    await prisma.order.update({
+      where: { id: order.id },
+      data: leg === 'PICKUP' ? { pickupArrivedAt: now } : { deliveryArrivedAt: now },
+    });
+    await addEvent(prisma, order.id, {
+      type: 'RIDER_ARRIVED',
+      title: leg === 'PICKUP' ? 'Rider arrived for pickup' : 'Rider arrived for delivery',
+      description: req.user!.name,
+      actorUserId: req.user!.id,
+      meta: { riderId, leg },
+    });
+
+    const full = await broadcastOrder(order.id);
+    realtime.toOrder(order.id, 'rider:arrived', { orderId: order.id, leg, riderId, at: now.toISOString() });
+    await notifyUser(full.customer.userId, {
+      title: leg === 'PICKUP' ? 'Your rider has arrived' : 'Your delivery has arrived',
+      message:
+        leg === 'PICKUP'
+          ? `${req.user!.name} is at your location. Please share your pickup OTP to hand over the clothes.`
+          : `${req.user!.name} is at your location with your order.`,
+      type: 'ORDER',
+      data: { orderId: order.id, leg },
+    });
+
+    res.json({ leg, arrivedAt: now, alreadyMarked: false });
+  }),
+);
+
+/**
+ * Every offer this rider has ever had, including the ones they declined and the
+ * ones that timed out. The app's History tab needs this - an order they refused
+ * never lands on their Orders list, so it has to come from here.
+ */
+ridersRouter.get(
+  '/me/requests/history',
+  asyncHandler(async (req, res) => {
+    const q = parseQuery(z.object({ status: z.enum(['all', 'accepted', 'declined', 'expired', 'rejected']).default('all') }), req.query);
+    const p = parsePagination(req.query);
+    // "rejected" is what the app calls declined + timed-out together
+    const statusFilter =
+      q.status === 'all'
+        ? {}
+        : q.status === 'rejected'
+          ? { status: { in: ['DECLINED', 'EXPIRED'] as PickupRequestStatus[] } }
+          : { status: q.status.toUpperCase() as PickupRequestStatus };
+
+    const where = { riderId: req.user!.riderId!, ...statusFilter };
+    const [rows, total] = await Promise.all([
+      prisma.pickupRequest.findMany({ where, include: { order: { include: orderInclude } }, orderBy: { offeredAt: 'desc' }, skip: p.skip, take: p.limit }),
+      prisma.pickupRequest.count({ where }),
+    ]);
+
+    res.json(
+      paginated(
+        rows.map((r) => ({
+          id: r.id,
+          leg: r.leg,
+          status: r.status,
+          statusLabel: r.status === 'EXPIRED' ? 'Missed' : toTitle(r.status),
+          payout: r.payout,
+          distanceKm: r.distanceKm,
+          offeredAt: r.offeredAt,
+          respondedAt: r.respondedAt,
+          order: serializeOrder(r.order, 'rider'),
+        })),
+        total,
+        p,
+      ),
+    );
   }),
 );
 

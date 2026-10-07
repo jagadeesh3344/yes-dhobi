@@ -8,7 +8,7 @@ import { logger } from '../../lib/logger.js';
 import { buildQuote, type QuoteItemInput } from '../../services/pricing.js';
 import { getSettings } from '../../services/settings.js';
 import { notifyAdmins, notifyUser } from '../../services/notifications.js';
-import { addEvent, broadcastOrder, loadOrder, transitionOrder } from '../../services/orders.js';
+import { addEvent, broadcastOrder, cancellation, loadOrder, transitionOrder } from '../../services/orders.js';
 import { startRiderDispatch } from '../../services/dispatch.js';
 
 export interface CreateOrderInput {
@@ -249,9 +249,10 @@ export async function createOrder(input: CreateOrderInput) {
 export async function customerCancelOrder(orderId: string, customerId: string, reason?: string) {
   const order = await loadOrder(orderId);
   if (order.customerId !== customerId) throw notFound('Order');
-  if (!['PENDING_PICKUP', 'ASSIGNED'].includes(order.status)) {
-    throw unprocessable('Orders can only be cancelled before pickup. Please contact support.');
-  }
+  // single source of truth, so the button the app shows and the rule the API
+  // enforces can never drift apart
+  const { canCancel, reason: blocked } = cancellation(order);
+  if (!canCancel) throw unprocessable(blocked!);
   return transitionOrder(order.id, 'CANCELLED', { actorUserId: order.customer.userId, reason: reason ?? 'Cancelled by customer' });
 }
 

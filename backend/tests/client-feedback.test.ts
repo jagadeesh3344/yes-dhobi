@@ -230,6 +230,40 @@ describe('customer: live tracking and cancellation', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('order lookup accepts what the apps actually send', () => {
+  it('finds the order by id, by order number, and by the bare number', async () => {
+    await resetRiders();
+    const orderId = await placeOrder();
+    const detail = await api().get(`/api/v1/orders/${orderId}`).set(auth(customerToken));
+    const orderNumber = detail.body.orderNumber as string; // e.g. YD-100945
+    expect(orderNumber).toMatch(/^YD-\d+$/);
+
+    const bare = orderNumber.replace('YD-', '');
+    // the rider app strips '#' and 'YD-' off the displayed '#YD-100945'
+    for (const key of [orderId, orderNumber, `#${orderNumber}`, bare]) {
+      const res = await api().get(`/api/v1/orders/${encodeURIComponent(key)}`).set(auth(customerToken));
+      expect(res.status, `lookup by "${key}"`).toBe(200);
+      expect(res.body.id).toBe(orderId);
+    }
+  });
+
+  it('lets the rider confirm pickup using the stripped number', async () => {
+    await resetRiders();
+    const orderId = await placeOrder();
+    const rider = await acceptWithNearest(orderId);
+    const detail = await api().get(`/api/v1/orders/${orderId}`).set(auth(customerToken));
+    const bare = (detail.body.orderNumber as string).replace('YD-', '');
+
+    const res = await api()
+      .post(`/api/v1/riders/me/orders/${bare}/confirm-pickup`)
+      .set(auth(rider.token))
+      .send({ otp: detail.body.otps.pickup });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('PICKED_UP');
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe('rider: arrived at location', () => {
   it('marks arrival, tells the customer, and records it on the order', async () => {
     await resetRiders();

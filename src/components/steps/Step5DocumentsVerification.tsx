@@ -32,8 +32,11 @@ export const Step5DocumentsVerification: React.FC<Step5Props> = ({
 
       if (result && (result.registrationId || result.vendorId || result.id || result.data?.id)) {
         const newRegId = result.registrationId || result.vendorId || result.id || result.data?.id;
+        const tempPassword = result.temporaryPassword ?? result.data?.temporaryPassword;
         updateFormData({
           registrationId: String(newRegId),
+          // shown once on the next screen and never sent back to us again
+          ...(tempPassword ? { temporaryPassword: String(tempPassword) } : {}),
           submittedAt: new Date().toISOString(),
         });
       }

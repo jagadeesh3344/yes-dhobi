@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Copy, Check, Phone, Mail, Clock, Download, QrCode, Play, Apple } from 'lucide-react';
+import { ShieldCheck, Copy, Check, Phone, Mail, Clock, Download, QrCode, Play, Apple, KeyRound, AlertTriangle } from 'lucide-react';
 import { RegistrationFormData } from '../../types';
 
 interface SuccessScreenProps {
@@ -9,14 +9,23 @@ interface SuccessScreenProps {
 
 export const SuccessScreen: React.FC<SuccessScreenProps> = ({ formData, onReset }) => {
   const [copied, setCopied] = useState(false);
+  const [passwordCopied, setPasswordCopied] = useState(false);
 
   const regId = formData.registrationId || 'YD-2024-89472';
   const mobile = formData.mobileNumber ? `+91 ${formData.mobileNumber}` : '+91 98765 43210';
+  const tempPassword = formData.temporaryPassword;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(regId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyPassword = () => {
+    if (!tempPassword) return;
+    navigator.clipboard.writeText(tempPassword);
+    setPasswordCopied(true);
+    setTimeout(() => setPasswordCopied(false), 2000);
   };
 
   return (
@@ -78,6 +87,43 @@ export const SuccessScreen: React.FC<SuccessScreenProps> = ({ formData, onReset 
                 <span className="text-sm font-extrabold text-slate-900">{mobile}</span>
               </div>
             </div>
+
+            {/* The partner app asks for a password, and this form never
+                collects one - so the backend generates it and hands it back
+                here, once. If they lose it they have to use Forgot Password. */}
+            {tempPassword && (
+              <div className="sm:col-span-2 bg-white rounded-xl p-3 border border-amber-200 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                    <KeyRound className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">
+                      Temporary Password
+                    </span>
+                    <span className="text-sm font-extrabold text-slate-900 font-mono break-all">{tempPassword}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopyPassword}
+                  className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-amber-600 transition-colors cursor-pointer flex-shrink-0"
+                  title="Copy temporary password"
+                >
+                  {passwordCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                </button>
+              </div>
+            )}
+
+            {tempPassword && (
+              <div className="sm:col-span-2 flex items-start gap-2 px-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] font-semibold text-amber-700 leading-relaxed">
+                  Save these now - this password is shown only once. Sign in to the partner app with
+                  your Registration ID and this password once your application is approved.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

@@ -125,15 +125,34 @@ export function serializeVendor(v: Prisma.VendorGetPayload<{ include: typeof ven
   };
 }
 
+function formatDocKeyToTitle(key: string): string {
+  return key
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .split(' ')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 export const verificationInclude = {
   user: { select: { id: true, name: true, phone: true, email: true } },
-  vendor: { select: { id: true, shopName: true, city: true } },
-  rider: { select: { id: true, vehicleType: true, vehicleNumber: true, zone: { select: { name: true } } } },
+  vendor: { select: { id: true, shopName: true, city: true, documents: true } },
+  rider: { select: { id: true, vehicleType: true, vehicleNumber: true, drivingLicenseNumber: true, documents: true, zone: { select: { name: true } } } },
   reviewedBy: { select: { id: true, name: true } },
 } satisfies Prisma.VerificationInclude;
 
 export function serializeVerification(v: Prisma.VerificationGetPayload<{ include: typeof verificationInclude }>) {
-  const docs = (v.documents ?? {}) as Record<string, string>;
+  const vDocs = (v.documents && typeof v.documents === 'object' ? v.documents : {}) as Record<string, string>;
+  const riderDocs = (v.rider?.documents && typeof v.rider.documents === 'object' ? v.rider.documents : {}) as Record<string, string>;
+  const vendorDocs = (v.vendor?.documents && typeof v.vendor.documents === 'object' ? v.vendor.documents : {}) as Record<string, string>;
+
+  // Merge verification docs with rider/vendor docs so documents are never lost
+  const mergedDocs: Record<string, string> = {
+    ...riderDocs,
+    ...vendorDocs,
+    ...vDocs,
+  };
+
   return {
     id: v.id,
     name: v.type === 'VENDOR' ? `${v.vendor?.shopName ?? ''} (${v.user.name})` : v.user.name,
@@ -145,11 +164,11 @@ export function serializeVerification(v: Prisma.VerificationGetPayload<{ include
     phone: v.user.phone,
     email: v.user.email,
     submittedDate: v.submittedAt,
-    docs: Object.keys(docs).map(toTitle),
-    docUrls: docs,
+    docs: Object.keys(mergedDocs).map(formatDocKeyToTitle),
+    docUrls: mergedDocs,
     status: toTitle(v.status),
     verificationStatus: v.status,
-    idNumber: v.idNumber,
+    idNumber: v.idNumber ?? v.rider?.drivingLicenseNumber,
     rejectionReason: v.rejectionReason,
     reviewedAt: v.reviewedAt,
     reviewedBy: v.reviewedBy?.name ?? null,

@@ -160,23 +160,50 @@ export function useRegistrationStore() {
   });
 
   const [formData, setFormData] = useState<RegistrationFormData>(() => {
-    const savedData = localStorage.getItem(STORAGE_KEY);
-    if (savedData) {
-      try {
+    try {
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (savedData) {
         return { ...initialFormData, ...JSON.parse(savedData) };
-      } catch (e) {
-        console.error('Failed to parse saved registration data', e);
       }
+    } catch (e) {
+      console.error('Failed to parse saved registration data', e);
     }
     return initialFormData;
   });
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(formData));
+    try {
+      // Exclude heavy base64 documents from localStorage to avoid browser QuotaExceededError (5MB limit)
+      const sanitized: Record<string, unknown> = { ...formData };
+      const docKeys: (keyof RegistrationFormData)[] = [
+        'profilePhoto',
+        'aadhaarFront',
+        'aadhaarBack',
+        'panFront',
+        'shopPhoto',
+        'gstCertificate',
+        'tradeLicense',
+        'labourLicense',
+        'cancelledCheque',
+      ];
+      for (const key of docKeys) {
+        const val = sanitized[key];
+        if (typeof val === 'string' && (val.startsWith('data:') || val.length > 500)) {
+          delete sanitized[key];
+        }
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
+    } catch (e) {
+      console.warn('LocalStorage save failed (quota exceeded or storage blocked):', e);
+    }
   }, [formData]);
 
   useEffect(() => {
-    localStorage.setItem(STEP_KEY, String(currentStep));
+    try {
+      localStorage.setItem(STEP_KEY, String(currentStep));
+    } catch (e) {
+      console.warn('Failed to save current step to localStorage:', e);
+    }
   }, [currentStep]);
 
   const updateFormData = (fields: Partial<RegistrationFormData>) => {

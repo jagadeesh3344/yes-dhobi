@@ -348,6 +348,10 @@ vendorsRouter.post(
     if (IN_PROGRESS.includes(o.status)) order = await transitionOrder(o.id, 'READY', { actorUserId: req.user!.id, description: 'Packaged and ready for delivery' });
     if (order.status !== 'READY') throw unprocessable(`Order is ${order.status}; it must be READY to book a rider`);
     if (order.deliveryRiderId) throw unprocessable('A delivery rider is already booked');
+
+    // Reaching READY already kicks the search off; startRiderDispatch leaves a
+    // running cascade alone, so this is safe whether it is first or second.
+    // Awaited, so the shop's response always reflects a live search.
     const notified = await startRiderDispatch(order.id, 'DELIVERY');
     res.json({ ...serializeOrder(await loadOrder(order.id), 'vendor'), ridersNotified: notified, isRiderBooked: false });
   }),

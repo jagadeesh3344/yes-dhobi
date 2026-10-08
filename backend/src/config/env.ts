@@ -56,8 +56,18 @@ const schema = z.object({
 
   /** how long one rider holds a pickup/delivery offer before it passes to the next rider */
   PICKUP_REQUEST_TTL_SECONDS: z.coerce.number().default(15),
-  /** how long one laundry partner holds an order offer before it passes to the next partner */
-  VENDOR_REQUEST_TTL_SECONDS: z.coerce.number().default(90),
+  /**
+   * How long one laundry partner holds an order offer before it passes to the
+   * next. The target is a partner allocated within a minute of the rider, so
+   * this has to be short enough to try several shops inside that minute - at
+   * the old 90 seconds a single unresponsive shop blew the whole budget.
+   */
+  VENDOR_REQUEST_TTL_SECONDS: z.coerce.number().default(20),
+  /**
+   * How long the partner search may run before admins are told it is late.
+   * The cascade keeps going; this only raises a flag so ops can step in.
+   */
+  VENDOR_ALLOCATION_TARGET_SECONDS: z.coerce.number().default(60),
   DISPATCH_RADIUS_KM: z.coerce.number().default(8),
   /** how many candidates are queued per cascade round */
   DISPATCH_MAX_CANDIDATES: z.coerce.number().default(15),

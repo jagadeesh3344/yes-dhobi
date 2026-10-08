@@ -86,7 +86,14 @@ Parameters:
     Description: Seconds one rider holds a pickup/delivery offer before it passes to the next rider
   VendorRequestTtlSeconds:
     Type: String
-    Default: '90'
+    Default: '20'
+    Description: >-
+      Seconds one laundry partner holds an offer. Short enough that several
+      shops can be tried inside the one-minute allocation target.
+  VendorAllocationTargetSeconds:
+    Type: String
+    Default: '60'
+    Description: Seconds before an unallocated partner search is flagged to admins
     Description: Seconds one laundry partner holds an order offer before it passes to the next partner
   DispatchRadiusKm:
     Type: String
@@ -502,6 +509,7 @@ Resources:
             - { Name: RAZORPAY_WEBHOOK_SECRET, Value: !Ref RazorpayWebhookSecret }
             - { Name: PICKUP_REQUEST_TTL_SECONDS, Value: !Ref PickupRequestTtlSeconds }
             - { Name: VENDOR_REQUEST_TTL_SECONDS, Value: !Ref VendorRequestTtlSeconds }
+            - { Name: VENDOR_ALLOCATION_TARGET_SECONDS, Value: !Ref VendorAllocationTargetSeconds }
             - { Name: DISPATCH_RADIUS_KM, Value: !Ref DispatchRadiusKm }
             - { Name: DISPATCH_MAX_CANDIDATES, Value: !Ref DispatchMaxCandidates }
             - { Name: RIDER_LOCATION_MAX_AGE_MINUTES, Value: !Ref RiderLocationMaxAgeMinutes }

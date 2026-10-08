@@ -273,7 +273,7 @@ async function vendorsWhoRefused(orderId: string): Promise<string[]> {
 export async function startRiderDispatch(
   orderId: string,
   leg: RequestLeg,
-  opts: { riderIds?: string[]; includeRefused?: boolean } = {},
+  opts: { riderIds?: string[]; includeRefused?: boolean; restartActive?: boolean } = {},
 ): Promise<number> {
   const order = await loadOrder(orderId);
   if (order.status === 'CANCELLED' || order.status === 'DELIVERED') throw unprocessable('Order is closed');
@@ -281,6 +281,24 @@ export async function startRiderDispatch(
   if (leg === 'DELIVERY' && order.deliveryRiderId) throw conflict('A delivery rider is already assigned');
 
   const kind = RIDER_KIND[leg];
+
+  // Starting a search that is already running would cancel the offer a rider
+  // is holding this second and send the order back to the top of the list.
+  // Two callers legitimately race here - an order reaching READY kicks the
+  // delivery search off by itself, and the shop may press "book rider" at the
+  // same moment - so the second one through is a no-op. Only an admin asking
+  // explicitly may restart a live cascade.
+  if (!opts.restartActive) {
+    const live = await prisma.dispatch.findFirst({
+      where: { orderId, kind, status: 'ACTIVE' },
+      select: { candidates: true },
+    });
+    if (live) {
+      logger.debug({ orderId, kind }, 'dispatch: a search is already running, leaving it alone');
+      return live.candidates.length;
+    }
+  }
+
   await cancelActiveDispatches(orderId, kind);
 
   // Riders who already said no are skipped, so a restarted cascade cannot
@@ -910,8 +928,31 @@ export const offerLeg = startRiderDispatch;
 // Sweeper: expire the live offer and move to the next candidate
 // ---------------------------------------------------------------------------
 
+/**
+ * Tell admins once about a partner search that has missed its target. The
+ * cascade carries on by itself; this only puts it in front of a human.
+ */
+async function flagLateVendorSearches(now: Date) {
+  const cutoff = dayjs(now).subtract(env.VENDOR_ALLOCATION_TARGET_SECONDS, 'second').toDate();
+  const late = await prisma.dispatch.findMany({
+    where: { kind: 'VENDOR', status: 'ACTIVE', lateFlaggedAt: null, createdAt: { lt: cutoff } },
+    select: { id: true, orderId: true, cursor: true, candidates: true },
+  });
+  for (const d of late) {
+    await prisma.dispatch.update({ where: { id: d.id }, data: { lateFlaggedAt: now } });
+    const order = await prisma.order.findUnique({ where: { id: d.orderId }, select: { orderNumber: true } });
+    await notifyAdmins({
+      title: 'Laundry partner still not allocated',
+      message: `Order ${order?.orderNumber ?? d.orderId} has been looking for a partner for over ${env.VENDOR_ALLOCATION_TARGET_SECONDS}s (${d.cursor} of ${d.candidates.length} tried). The search continues - assign one manually if it is urgent.`,
+      type: 'VENDOR',
+      data: { orderId: d.orderId },
+    });
+  }
+}
+
 export async function sweepDispatches() {
   const now = new Date();
+  await flagLateVendorSearches(now).catch((err) => logger.error({ err }, 'late vendor flag failed'));
   const due = await prisma.dispatch.findMany({
     where: { status: 'ACTIVE', expiresAt: { lt: now } },
     select: { id: true, kind: true, currentOfferId: true, orderId: true },

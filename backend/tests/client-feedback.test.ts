@@ -465,6 +465,78 @@ describe('rider: hand-off speed (TAT)', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('second leg: a delivery rider is found as soon as the order is ready', () => {
+  it('starts the search the moment the order reaches READY, without anyone booking', async () => {
+    await resetRiders();
+    const orderId = await placeOrder();
+    const rider = await acceptWithNearest(orderId);
+
+    // walk the order to READY the way a shop does, via the status endpoint -
+    // no "book rider" call anywhere in this test
+    const detail = await api().get(`/api/v1/orders/${orderId}`).set(auth(customerToken));
+    await api().post(`/api/v1/riders/me/orders/${orderId}/confirm-pickup`).set(auth(rider.token)).send({ otp: detail.body.otps.pickup });
+    await new Promise((r) => setTimeout(r, 600));
+    await api().post(`/api/v1/vendors/me/orders/${orderId}/accept`).set(auth(vendorToken)).send({});
+    const vendorView = await api().get(`/api/v1/vendors/me/orders/${orderId}`).set(auth(vendorToken));
+    await api().post(`/api/v1/riders/me/orders/${orderId}/confirm-dropoff`).set(auth(rider.token)).send({ otp: vendorView.body.otps.riderDrop });
+
+    for (const status of ['WASHING', 'IRONING', 'QUALITY_CHECK', 'READY']) {
+      const res = await api().post(`/api/v1/vendors/me/orders/${orderId}/status`).set(auth(vendorToken)).send({ status });
+      expect(res.status, `set ${status}`).toBe(200);
+    }
+
+    // a delivery cascade should already be running
+    await new Promise((r) => setTimeout(r, 600));
+    const dispatch = await prisma.dispatch.findFirst({ where: { orderId, kind: 'RIDER_DELIVERY' } });
+    expect(dispatch, 'no delivery search was started').toBeTruthy();
+    expect(dispatch!.status).toBe('ACTIVE');
+
+    const offer = await prisma.pickupRequest.findFirst({ where: { orderId, leg: 'DELIVERY', status: 'OFFERED' } });
+    expect(offer, 'no rider was offered the delivery').toBeTruthy();
+    expect(offer!.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('booking a rider does not restart a search that is already running', async () => {
+    const order = await prisma.order.findFirst({
+      where: { status: 'READY', deliveryRiderId: null },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
+    });
+    expect(order, 'needs the READY order from the previous test').toBeTruthy();
+
+    const before = await prisma.pickupRequest.findFirst({ where: { orderId: order!.id, leg: 'DELIVERY', status: 'OFFERED' } });
+    expect(before).toBeTruthy();
+
+    const res = await api().post(`/api/v1/vendors/me/orders/${order!.id}/book-rider`).set(auth(vendorToken)).send({});
+    expect(res.status).toBe(200);
+
+    // the same rider still holds the same offer - it was not cancelled and
+    // restarted from the top of the list
+    const after = await prisma.pickupRequest.findFirst({ where: { orderId: order!.id, leg: 'DELIVERY', status: 'OFFERED' } });
+    expect(after!.id).toBe(before!.id);
+    expect(after!.riderId).toBe(before!.riderId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('laundry partner is searched for within the minute', () => {
+  it('gives each shop a short window so several can be tried inside a minute', async () => {
+    await resetRiders();
+    const orderId = await placeOrder();
+    await acceptWithNearest(orderId);
+    await new Promise((r) => setTimeout(r, 700));
+
+    const offer = await prisma.vendorRequest.findFirst({ where: { orderId, status: 'OFFERED' } });
+    expect(offer, 'no partner was offered the order').toBeTruthy();
+
+    const windowSeconds = Math.round((offer!.expiresAt.getTime() - offer!.offeredAt.getTime()) / 1000);
+    expect(windowSeconds).toBeLessThanOrEqual(30);
+    // at least two shops must fit inside the one-minute target
+    expect(windowSeconds * 2).toBeLessThanOrEqual(60);
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe('rider: verification verdict', () => {
   it('a rejected rider is locked out with the exact message and a 24 hour wait', async () => {
     const phone = RIDERS[2]!.phone;

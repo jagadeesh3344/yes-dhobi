@@ -710,6 +710,8 @@ model Dispatch {
   /// 1 = initial radius, 2 = widened radius
   round          Int            @default(1)
   exhaustedAt    DateTime?
+  /// set once admins have been told this search is running late
+  lateFlaggedAt  DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 

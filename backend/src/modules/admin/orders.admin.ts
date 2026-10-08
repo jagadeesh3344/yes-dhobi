@@ -362,7 +362,8 @@ adminOrdersRouter.post(
       res.json({ partnersNotified });
       return;
     }
-    const ridersNotified = await startRiderDispatch(order.id, leg, { riderIds, includeRefused });
+    // an admin pressing "search again" means exactly that, even mid-cascade
+    const ridersNotified = await startRiderDispatch(order.id, leg, { riderIds, includeRefused, restartActive: true });
     res.json({ ridersNotified });
   }),
 );

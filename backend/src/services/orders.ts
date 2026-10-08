@@ -468,6 +468,20 @@ export async function transitionOrder(orderId: string, next: OrderStatus, opts: 
   }
 
   const o = await broadcastOrder(orderId);
+
+  // The washing is done and the order is packed: start looking for a delivery
+  // rider straight away. This used to happen only if the shop pressed "book
+  // rider" - marking the order READY any other way (the status dropdown, an
+  // admin, the API) left it sitting there with nobody looking for a rider at
+  // all, which is why the second leg took so long to get moving.
+  if (next === 'READY' && !o.deliveryRiderId) {
+    // imported lazily: dispatch.ts imports this module
+    const { startRiderDispatch } = await import('./dispatch.js');
+    startRiderDispatch(orderId, 'DELIVERY').catch((err) =>
+      logger.warn({ err, orderId }, 'delivery dispatch failed to start'),
+    );
+  }
+
   const msg = CUSTOMER_MESSAGES[next];
   if (msg) {
     await notifyUser(o.customer.userId, {

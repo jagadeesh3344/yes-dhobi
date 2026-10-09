@@ -1,5 +1,5 @@
-import React from 'react';
-import { Shirt, Sparkles, Flame, Shield, Footprints, Droplets, Layers, Zap } from 'lucide-react';
+import React, { useState } from 'react';
+import { Shirt, Sparkles, Flame, Shield, Footprints, Droplets, Layers, Zap, AlertCircle } from 'lucide-react';
 import { RegistrationFormData, ServiceItem } from '../../types';
 
 interface Step3Props {
@@ -43,12 +43,59 @@ export const Step3ServicePricing: React.FC<Step3Props> = ({
   onNext,
   onBack
 }) => {
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onNext();
-  };
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const servicesList = Object.values(formData.services || {}) as ServiceItem[];
+  const enabledCount = servicesList.filter((s) => s.enabled).length;
+
+  const validate = (): boolean => {
+    const errs: Record<string, string> = {};
+
+    if (enabledCount === 0) {
+      errs.services = 'Please enable at least one service you provide';
+    }
+
+    // Check that all enabled services have a valid price > 0
+    servicesList.forEach((s) => {
+      if (s.enabled && (!s.price || s.price <= 0 || isNaN(s.price))) {
+        errs[`price_${s.id}`] = `Please set a valid price for ${s.name}`;
+      }
+    });
+
+    if (!formData.standardDeliveryTime) {
+      errs.standardDeliveryTime = 'Please select standard turnaround delivery time';
+    }
+
+    if (formData.offerExpressDelivery) {
+      const markup = parseFloat(formData.expressPriceMarkup);
+      if (!formData.expressPriceMarkup || isNaN(markup) || markup <= 0) {
+        errs.expressPriceMarkup = 'Please enter valid express delivery markup percentage';
+      }
+    }
+
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (validate()) {
+      onNext();
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handleToggle = (serviceId: string) => {
+    toggleService(serviceId);
+    if (errors.services) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.services;
+        return next;
+      });
+    }
+  };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -61,10 +108,36 @@ export const Step3ServicePricing: React.FC<Step3Props> = ({
         </p>
       </div>
 
+      {/* Global Error Summary Banner */}
+      {Object.keys(errors).length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-red-800 animate-in fade-in">
+          <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold block mb-0.5">Please correct the highlighted errors before continuing:</span>
+            <ul className="list-disc list-inside space-y-0.5 text-[11px] text-red-700">
+              {Object.values(errors).slice(0, 3).map((msg, i) => (
+                <li key={i}>{msg}</li>
+              ))}
+              {Object.keys(errors).length > 3 && (
+                <li>...and {Object.keys(errors).length - 3} other issue(s)</li>
+              )}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {/* Services List */}
       <div className="space-y-4">
+        {errors.services && (
+          <p className="text-xs font-semibold text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-200">
+            {errors.services}
+          </p>
+        )}
+
         {servicesList.map((service) => {
           const isEnabled = service.enabled;
+          const priceErr = errors[`price_${service.id}`];
+
           return (
             <div
               key={service.id}
@@ -92,7 +165,7 @@ export const Step3ServicePricing: React.FC<Step3Props> = ({
                 {/* Toggle Switch */}
                 <button
                   type="button"
-                  onClick={() => toggleService(service.id)}
+                  onClick={() => handleToggle(service.id)}
                   className={`w-12 h-6 rounded-full transition-colors relative flex-shrink-0 focus:outline-none cursor-pointer ${
                     isEnabled ? 'bg-blue-600' : 'bg-slate-300'
                   }`}
@@ -111,13 +184,33 @@ export const Step3ServicePricing: React.FC<Step3Props> = ({
                   <label className="block text-xs font-bold text-slate-800 mb-1">
                     {service.unit} <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="number"
-                    required
-                    value={service.price}
-                    onChange={(e) => updateServicePrice(service.id, parseFloat(e.target.value) || 0)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 font-semibold"
-                  />
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-2.5 text-slate-400 font-bold text-sm">₹</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      maxLength={6}
+                      value={service.price || ''}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9.]/g, '');
+                        updateServicePrice(service.id, parseFloat(val) || 0);
+                        if (priceErr) {
+                          setErrors((prev) => {
+                            const next = { ...prev };
+                            delete next[`price_${service.id}`];
+                            return next;
+                          });
+                        }
+                      }}
+                      className={`w-full pl-8 pr-3.5 py-2.5 rounded-xl border text-sm font-semibold focus:outline-none transition-colors ${
+                        priceErr
+                          ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 bg-red-50/20'
+                          : 'border-slate-200 focus:ring-2 focus:ring-blue-600'
+                      }`}
+                      placeholder="e.g. 50"
+                    />
+                  </div>
+                  {priceErr && <p className="text-[11px] text-red-600 font-medium mt-1">{priceErr}</p>}
                 </div>
               )}
             </div>
@@ -135,14 +228,24 @@ export const Step3ServicePricing: React.FC<Step3Props> = ({
             </label>
             <select
               value={formData.standardDeliveryTime}
-              onChange={(e) => updateFormData({ standardDeliveryTime: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+              onChange={(e) => {
+                updateFormData({ standardDeliveryTime: e.target.value });
+                if (errors.standardDeliveryTime) setErrors((prev) => ({ ...prev, standardDeliveryTime: '' }));
+              }}
+              className={`w-full px-3.5 py-2.5 rounded-xl border text-sm bg-white focus:outline-none transition-colors ${
+                errors.standardDeliveryTime
+                  ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100'
+                  : 'border-slate-200 focus:ring-2 focus:ring-blue-600'
+              }`}
             >
               <option value="">Select Delivery Time</option>
               <option value="24 Hours">24 Hours</option>
               <option value="48 Hours">48 Hours</option>
               <option value="72 Hours">72 Hours</option>
             </select>
+            {errors.standardDeliveryTime && (
+              <p className="text-[11px] text-red-600 font-medium mt-1">{errors.standardDeliveryTime}</p>
+            )}
           </div>
 
           <div>
@@ -164,13 +267,32 @@ export const Step3ServicePricing: React.FC<Step3Props> = ({
                 />
               </button>
             </div>
-            <input
-              type="text"
-              disabled={!formData.offerExpressDelivery}
-              value={formData.expressPriceMarkup}
-              onChange={(e) => updateFormData({ expressPriceMarkup: e.target.value })}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:bg-slate-100 disabled:text-slate-400"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={3}
+                disabled={!formData.offerExpressDelivery}
+                value={formData.expressPriceMarkup}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, '').slice(0, 3);
+                  updateFormData({ expressPriceMarkup: val });
+                  if (errors.expressPriceMarkup) setErrors((prev) => ({ ...prev, expressPriceMarkup: '' }));
+                }}
+                placeholder={formData.offerExpressDelivery ? "e.g. 20 (%)" : "Express disabled"}
+                className={`w-full px-3.5 py-2.5 rounded-xl border text-sm bg-white focus:outline-none disabled:bg-slate-100 disabled:text-slate-400 transition-colors ${
+                  errors.expressPriceMarkup
+                    ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100'
+                    : 'border-slate-200 focus:ring-2 focus:ring-blue-600'
+                }`}
+              />
+              {formData.offerExpressDelivery && (
+                <span className="absolute right-3.5 top-2.5 text-xs font-bold text-slate-400">% extra</span>
+              )}
+            </div>
+            {errors.expressPriceMarkup && (
+              <p className="text-[11px] text-red-600 font-medium mt-1">{errors.expressPriceMarkup}</p>
+            )}
           </div>
         </div>
       </div>

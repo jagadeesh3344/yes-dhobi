@@ -257,6 +257,7 @@ export function transformFormDataToApiPayload(formData: RegistrationFormData) {
     agreedToPartnerTerms: Boolean(formData.agreeTerms),
     agreedToPaymentTerms: Boolean(formData.agreeCommission),
     consentedToBackgroundVerification: Boolean(formData.consentBackgroundCheck),
+    ...(formData.password && formData.password.trim().length >= 6 ? { password: formData.password.trim() } : {}),
   };
 }
 

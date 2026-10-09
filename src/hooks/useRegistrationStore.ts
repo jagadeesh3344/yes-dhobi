@@ -144,6 +144,8 @@ export const initialFormData: RegistrationFormData = {
   agreeCommission: false,
   consentBackgroundCheck: false,
 
+  password: '',
+  confirmPassword: '',
   registrationId: '',
   submittedAt: ''
 };

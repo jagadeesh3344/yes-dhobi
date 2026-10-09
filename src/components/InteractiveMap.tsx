@@ -12,6 +12,7 @@ interface InteractiveMapProps {
   workingDays: string[];
   workingHoursFrom: string;
   workingHoursTo: string;
+  errors?: Record<string, string>;
   onAddressChange: (val: string) => void;
   onLandmarkChange: (val: string) => void;
   onPincodeChange: (val: string) => void;
@@ -39,6 +40,39 @@ const availableZones = [
 
 const allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+const postalMap: Record<string, { city: string; state: string }> = {
+  '11': { city: 'New Delhi', state: 'Delhi' },
+  '12': { city: 'Faridabad / Gurgaon', state: 'Haryana' },
+  '13': { city: 'Ambala', state: 'Haryana' },
+  '14': { city: 'Ludhiana', state: 'Punjab' },
+  '16': { city: 'Chandigarh', state: 'Punjab / Chandigarh' },
+  '18': { city: 'Jammu', state: 'Jammu & Kashmir' },
+  '19': { city: 'Srinagar', state: 'Jammu & Kashmir' },
+  '20': { city: 'Noida / Ghaziabad', state: 'Uttar Pradesh' },
+  '22': { city: 'Lucknow', state: 'Uttar Pradesh' },
+  '24': { city: 'Dehradun', state: 'Uttarakhand' },
+  '30': { city: 'Jaipur', state: 'Rajasthan' },
+  '38': { city: 'Ahmedabad', state: 'Gujarat' },
+  '39': { city: 'Surat', state: 'Gujarat' },
+  '40': { city: 'Mumbai', state: 'Maharashtra' },
+  '41': { city: 'Pune', state: 'Maharashtra' },
+  '50': { city: 'Hyderabad', state: 'Telangana' },
+  '51': { city: 'Tirupati', state: 'Andhra Pradesh' },
+  '52': { city: 'Vijayawada', state: 'Andhra Pradesh' },
+  '53': { city: 'Visakhapatnam', state: 'Andhra Pradesh' },
+  '56': { city: 'Bengaluru', state: 'Karnataka' },
+  '60': { city: 'Chennai', state: 'Tamil Nadu' },
+  '68': { city: 'Kochi', state: 'Kerala' },
+  '69': { city: 'Thiruvananthapuram', state: 'Kerala' },
+  '70': { city: 'Kolkata', state: 'West Bengal' },
+  '78': { city: 'Guwahati', state: 'Assam' },
+  '80': { city: 'Patna', state: 'Bihar' },
+  '83': { city: 'Ranchi', state: 'Jharkhand' },
+  '46': { city: 'Bhopal', state: 'Madhya Pradesh' },
+  '45': { city: 'Indore', state: 'Madhya Pradesh' },
+  '75': { city: 'Bhubaneswar', state: 'Odisha' },
+};
+
 export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   pickupAddress,
   landmark,
@@ -50,6 +84,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   workingDays,
   workingHoursFrom,
   workingHoursTo,
+  errors = {},
   onAddressChange,
   onLandmarkChange,
   onPincodeChange,
@@ -62,7 +97,6 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   onHoursToChange
 }) => {
   const [pinPos, setPinPos] = useState({ x: 50, y: 50 });
-  const [isDragging, setIsDragging] = useState(false);
 
   const toggleZone = (zone: string) => {
     if (serviceAreas.includes(zone)) {
@@ -87,6 +121,19 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     setPinPos({ x: Math.max(10, Math.min(90, x)), y: Math.max(15, Math.min(85, y)) });
   };
 
+  const handlePincodeInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value.replace(/\D/g, '').slice(0, 6);
+    onPincodeChange(raw);
+
+    if (raw.length >= 2) {
+      const prefix = raw.slice(0, 2);
+      if (postalMap[prefix]) {
+        if (!city) onCityChange(postalMap[prefix].city);
+        if (!state) onStateChange(postalMap[prefix].state);
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Address & Landmark */}
@@ -99,8 +146,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           onChange={(e) => onAddressChange(e.target.value)}
           placeholder="Full address where customers drop off or rider collects"
           rows={3}
-          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+          className={`w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors ${
+            errors.pickupAddress
+              ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 bg-red-50/20'
+              : 'border-slate-200 focus:ring-2 focus:ring-blue-600'
+          }`}
         />
+        {errors.pickupAddress && (
+          <p className="text-[11px] text-red-600 font-medium mt-1">{errors.pickupAddress}</p>
+        )}
       </div>
 
       <div>
@@ -112,8 +166,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           value={landmark}
           onChange={(e) => onLandmarkChange(e.target.value)}
           placeholder="Near metro station, temple, market, etc."
-          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+          className={`w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors ${
+            errors.landmark
+              ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 bg-red-50/20'
+              : 'border-slate-200 focus:ring-2 focus:ring-blue-600'
+          }`}
         />
+        {errors.landmark && (
+          <p className="text-[11px] text-red-600 font-medium mt-1">{errors.landmark}</p>
+        )}
       </div>
 
       {/* Pin code, City, State Grid */}
@@ -124,11 +185,20 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           </label>
           <input
             type="text"
+            inputMode="numeric"
+            maxLength={6}
             value={pincode}
-            onChange={(e) => onPincodeChange(e.target.value)}
-            placeholder="e.g. 110024"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+            onChange={handlePincodeInput}
+            placeholder="e.g. 500001"
+            className={`w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors ${
+              errors.locationPincode
+                ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 bg-red-50/20'
+                : 'border-slate-200 focus:ring-2 focus:ring-blue-600'
+            }`}
           />
+          {errors.locationPincode && (
+            <p className="text-[11px] text-red-600 font-medium mt-1">{errors.locationPincode}</p>
+          )}
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-800 mb-1.5">
@@ -138,9 +208,16 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             type="text"
             value={city}
             onChange={(e) => onCityChange(e.target.value)}
-            placeholder="e.g. New Delhi"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-600"
+            placeholder="e.g. Hyderabad"
+            className={`w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors ${
+              errors.locationCity
+                ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 bg-red-50/20'
+                : 'border-slate-200 focus:ring-2 focus:ring-blue-600'
+            }`}
           />
+          {errors.locationCity && (
+            <p className="text-[11px] text-red-600 font-medium mt-1">{errors.locationCity}</p>
+          )}
         </div>
         <div>
           <label className="block text-xs font-bold text-slate-800 mb-1.5">
@@ -150,9 +227,16 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             type="text"
             value={state}
             onChange={(e) => onStateChange(e.target.value)}
-            placeholder="e.g. Delhi"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-600"
+            placeholder="e.g. Telangana"
+            className={`w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors ${
+              errors.locationState
+                ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100 bg-red-50/20'
+                : 'border-slate-200 focus:ring-2 focus:ring-blue-600'
+            }`}
           />
+          {errors.locationState && (
+            <p className="text-[11px] text-red-600 font-medium mt-1">{errors.locationState}</p>
+          )}
         </div>
       </div>
 
@@ -185,7 +269,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           >
             <div className="bg-slate-900 text-white font-bold text-[11px] px-3 py-1 rounded-md shadow-lg flex items-center gap-1.5 mb-1 whitespace-nowrap">
               <Navigation className="w-3 h-3 text-blue-400" />
-              <span>Drag pin to your exact location</span>
+              <span>Tap on map to place pin</span>
             </div>
             <div className="w-8 h-8 rounded-full bg-blue-600 border-2 border-white shadow-xl flex items-center justify-center text-white">
               <MapPin className="w-5 h-5 fill-white text-blue-600" />
@@ -194,7 +278,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           </div>
         </div>
         <p className="text-[11px] text-slate-500 mt-1.5">
-          Drag pin to your exact location to help riders navigate.
+          Tap anywhere on map canvas to set your location coordinates for rider route planning.
         </p>
       </div>
 
@@ -204,7 +288,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           Service Radius <span className="text-red-500">*</span>
         </label>
         <div className="flex items-center gap-3">
-          {['1 km', '2 km', '3 km', '5 km'].map((r) => {
+          {['1 km', '2 km', '3 km', '5 km', '10 km'].map((r) => {
             const isSelected = serviceRadius === r;
             return (
               <button
@@ -251,7 +335,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             );
           })}
         </div>
-        <p className="text-[11px] text-slate-500 mt-1.5">Select areas you can serve</p>
+        <p className="text-[11px] text-slate-500 mt-1.5">Select specific zones you service</p>
       </div>
 
       {/* Working Days */}
@@ -278,6 +362,9 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             );
           })}
         </div>
+        {errors.workingDays && (
+          <p className="text-[11px] text-red-600 font-medium mt-1">{errors.workingDays}</p>
+        )}
       </div>
 
       {/* Working Hours */}

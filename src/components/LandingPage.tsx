@@ -42,10 +42,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
       a: 'All earnings are directly deposited into your linked bank account every Monday via NEFT/UPI.'
     },
     {
-      q: 'What if I don\'t have a shop?',
-      a: 'You can still partner as a home-based Dhobi or independent ironing provider if you meet quality standards.'
-    },
-    {
       q: 'Do you provide training?',
       a: 'Yes, we provide free onboarding training, customer handling guides, and free detergent samples.'
     }
@@ -100,30 +96,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
                 className="w-full h-full object-cover object-center"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-transparent pointer-events-none" />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Statistics Bar */}
-      <section className="w-full bg-white border-b border-slate-200 py-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
-            <div>
-              <div className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">30+</div>
-              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-1">LAUNDRY PARTNERS</div>
-            </div>
-            <div>
-              <div className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">01</div>
-              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-1">CITIES ACROSS INDIA</div>
-            </div>
-            <div>
-              <div className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">10K+</div>
-              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-1">ORDERS PROCESSED</div>
-            </div>
-            <div>
-              <div className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">₹30 Lakhs+</div>
-              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mt-1">PAID TO PARTNERS</div>
             </div>
           </div>
         </div>
@@ -263,7 +235,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
           <div className="mb-12">
             <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">PARTNER SUCCESS STORIES</span>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-1">
-              Empowering Laundry Partners Across India to Earn 3x More
+              Empowering Laundry Partners Across Hyderabad to Earn 3x More
             </h2>
           </div>
 
@@ -271,7 +243,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
             <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
               <div>
                 <p className="text-sm text-slate-700 italic leading-relaxed mb-6">
-                  "Before Yes Dhobi, I relied only on local street walk-ins. Now I have regular contracts with 3 major luxury residential complexes. My monthly income has tripled!"
+                  "Before Yes Dhobi, I relied only on local street walk-ins in Madhapur. Now I have regular contracts with 3 major gated communities across Hitec City and Gachibowli. My monthly income has tripled!"
                 </p>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-sm">
@@ -279,7 +251,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
                   </div>
                   <div>
                     <h5 className="text-sm font-bold text-slate-900">Ramesh Kumar</h5>
-                    <span className="text-xs text-slate-500">Mumbai Partner</span>
+                    <span className="text-xs text-slate-500">Hyderabad Partner (Madhapur)</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 text-amber-400 mb-6">
@@ -298,7 +270,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
             <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
               <div>
                 <p className="text-sm text-slate-700 italic leading-relaxed mb-6">
-                  "The digital order system is so simple. My son manages the app, and I focus on high-quality ironing. Payouts are perfectly on time every single Tuesday."
+                  "The digital order system is so simple. My son manages the partner app, and I focus on premium ironing for customers across Kukatpally and Jubilee Hills. Payouts are perfectly on time every single Tuesday."
                 </p>
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-sm">
@@ -306,7 +278,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
                   </div>
                   <div>
                     <h5 className="text-sm font-bold text-slate-900">Harishchandra Prasad</h5>
-                    <span className="text-xs text-slate-500">Delhi NCR Partner</span>
+                    <span className="text-xs text-slate-500">Hyderabad Partner (Kukatpally)</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 text-amber-400 mb-6">

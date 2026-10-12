@@ -38,6 +38,16 @@ const schema = z.object({
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_OTP_TEMPLATE: z.string().optional(),
   WHATSAPP_TEMPLATE_LANG: z.string().default('en'),
+  /**
+   * Authentication templates carry a one-tap "copy code" button and need the
+   * code passed a second time as a button parameter. A plain utility template
+   * has no button, and sending one makes Meta reject the message - set this
+   * false in that case.
+   */
+  WHATSAPP_TEMPLATE_HAS_BUTTON: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true' || v === '1'),
   WHATSAPP_API_VERSION: z.string().default('v21.0'),
   WHATSAPP_VERIFY_TOKEN: z.string().default('yesdhobi_whatsapp_2026'),
 

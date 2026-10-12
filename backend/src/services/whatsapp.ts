@@ -38,8 +38,12 @@ export async function sendWhatsAppOtp(to: string, code: string): Promise<WhatsAp
       language: { code: env.WHATSAPP_TEMPLATE_LANG },
       components: [
         { type: 'body', parameters: [{ type: 'text', text: code }] },
-        // authentication templates include a one-tap "copy code" button
-        { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: code }] },
+        // Authentication templates carry a one-tap "copy code" button, which
+        // wants the code again as a button parameter. A utility template has
+        // no button and Meta rejects the message if we send one anyway.
+        ...(env.WHATSAPP_TEMPLATE_HAS_BUTTON
+          ? [{ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: code }] }]
+          : []),
       ],
     },
   };

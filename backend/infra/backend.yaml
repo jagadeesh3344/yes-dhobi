@@ -132,6 +132,13 @@ Parameters:
   WhatsappOtpTemplate:
     Type: String
     Default: ''
+  WhatsappTemplateHasButton:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      true for an AUTHENTICATION template (one-tap copy-code button), false for
+      a plain utility template with no button.
   WhatsappTemplateLang:
     Type: String
     Default: en
@@ -502,6 +509,7 @@ Resources:
             - { Name: WHATSAPP_PHONE_NUMBER_ID, Value: !Ref WhatsappPhoneNumberId }
             - { Name: WHATSAPP_ACCESS_TOKEN, Value: !Ref WhatsappAccessToken }
             - { Name: WHATSAPP_OTP_TEMPLATE, Value: !Ref WhatsappOtpTemplate }
+            - { Name: WHATSAPP_TEMPLATE_HAS_BUTTON, Value: !Ref WhatsappTemplateHasButton }
             - { Name: WHATSAPP_TEMPLATE_LANG, Value: !Ref WhatsappTemplateLang }
             - { Name: PAYMENT_PROVIDER, Value: !Ref PaymentProvider }
             - { Name: RAZORPAY_KEY_ID, Value: !Ref RazorpayKeyId }

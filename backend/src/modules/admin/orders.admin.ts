@@ -424,6 +424,25 @@ adminOrdersRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const order = await loadOrder(req.params.id!);
+    const hard = req.query.hard === 'true' || req.query.purge === 'true';
+    if (hard) {
+      await prisma.$transaction([
+        prisma.orderEvent.deleteMany({ where: { orderId: order.id } }),
+        prisma.orderItem.deleteMany({ where: { orderId: order.id } }),
+        prisma.orderMessage.deleteMany({ where: { orderId: order.id } }),
+        prisma.pickupRequest.deleteMany({ where: { orderId: order.id } }),
+        prisma.vendorRequest.deleteMany({ where: { orderId: order.id } }),
+        prisma.dispatch.deleteMany({ where: { orderId: order.id } }),
+        prisma.supportTicket.deleteMany({ where: { orderId: order.id } }),
+        prisma.walletTransaction.deleteMany({ where: { orderId: order.id } }),
+        prisma.ledgerEntry.deleteMany({ where: { orderId: order.id } }),
+        prisma.promotionRedemption.deleteMany({ where: { orderId: order.id } }),
+        prisma.payment.deleteMany({ where: { orderId: order.id } }),
+        prisma.order.delete({ where: { id: order.id } }),
+      ]);
+      res.json({ message: 'Order permanently deleted' });
+      return;
+    }
     if (order.status !== 'CANCELLED') await transitionOrder(order.id, 'CANCELLED', { actorUserId: req.user!.id, force: true, reason: 'Cancelled by admin' });
     res.json({ message: 'Order cancelled' });
   }),

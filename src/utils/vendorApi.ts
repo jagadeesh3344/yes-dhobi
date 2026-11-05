@@ -151,13 +151,13 @@ export function transformFormDataToApiPayload(formData: RegistrationFormData) {
 
   // 3. Location
   const location = {
-    shopAddress: formData.pickupAddress || formData.currentAddress || 'Shop 12, Market Complex',
+    shopAddress: formData.pickupAddress || formData.exactShopLocation || formData.currentAddress || 'Shop 12, Market Complex',
     landmark: formData.landmark || 'Near Metro Station',
-    pincode: formData.locationPincode || formData.pincode || '110024',
-    city: formData.locationCity || formData.city || 'New Delhi',
-    state: formData.locationState || formData.state || 'Delhi',
-    latitude: typeof formData.lat === 'number' ? formData.lat : 28.5678,
-    longitude: typeof formData.lng === 'number' ? formData.lng : 77.2435,
+    pincode: formData.locationPincode || formData.pincode || '500013',
+    city: formData.locationCity || formData.city || 'Hyderabad',
+    state: formData.locationState || formData.state || 'Telangana',
+    latitude: typeof formData.lat === 'number' && !isNaN(formData.lat) ? formData.lat : 17.3850,
+    longitude: typeof formData.lng === 'number' && !isNaN(formData.lng) ? formData.lng : 78.4867,
     serviceRadiusKm: parseNumber(formData.serviceRadius, 5.0),
     workingHoursFrom: formatTimeString(formData.workingHoursFrom, '08:00:00'),
     workingHoursTo: formatTimeString(formData.workingHoursTo, '19:00:00'),

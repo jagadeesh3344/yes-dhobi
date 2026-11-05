@@ -9,8 +9,28 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-const ADMIN_EMAIL = (process.env.SEED_ADMIN_EMAIL ?? 'admin@yesdhobi.com').toLowerCase();
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? 'Admin@12345';
+const ADMIN_PARTNERS = [
+  {
+    email: 'vastrasolutionspvtltd@gmail.com',
+    name: 'Vastra Solutions',
+    password: process.env.PARTNER1_PASSWORD ?? 'Yesdhobi@1575',
+  },
+  {
+    email: 'anirudhailaboina@gmail.com',
+    name: 'Anirudh',
+    password: process.env.PARTNER2_PASSWORD ?? 'Anirudh@2026',
+  },
+  {
+    email: 'kanthgade7@gmail.com',
+    name: 'Kanthgade',
+    password: process.env.PARTNER3_PASSWORD ?? 'Kanthgade@777',
+  },
+  {
+    email: (process.env.SEED_ADMIN_EMAIL ?? 'admin@yesdhobi.com').toLowerCase(),
+    name: 'Yes Dhobi Admin',
+    password: process.env.SEED_ADMIN_PASSWORD ?? 'Admin@12345',
+  },
+];
 const DEMO_PASSWORD = 'Partner@123';
 
 // ids 1..9 match SERVICE_ID_MAP in the vendor web app
@@ -19,8 +39,8 @@ const SERVICES: { code: string; name: string; description: string; rateUnit: Rat
   { code: 'wash_iron', name: 'Wash & Iron', description: 'Machine wash and dry followed by high-quality ironing.', rateUnit: 'KG', basePrice: 80, leadTimeHours: 48, iconName: 'Shirt' },
   { code: 'steam_iron', name: 'Steam Iron', description: 'Professional steam pressing for wrinkle-free crisp garments.', rateUnit: 'ITEM', basePrice: 15, leadTimeHours: 24, iconName: 'Wind' },
   { code: 'dry_iron', name: 'Dry Iron', description: 'Classic dry ironing for cottons and daily wear.', rateUnit: 'ITEM', basePrice: 10, leadTimeHours: 24, iconName: 'Wind' },
-  { code: 'dry_cleaning', name: 'Dry Cleaning', description: 'Specialised solvent cleaning for delicate fabrics, suits and designer apparel.', rateUnit: 'ITEM', basePrice: 120, leadTimeHours: 72, iconName: 'Shirt' },
-  { code: 'shoe_cleaning', name: 'Shoe Cleaning', description: 'Professional shoe cleaning without harming the material.', rateUnit: 'PAIR', basePrice: 199, leadTimeHours: 48, iconName: 'Footprints' },
+  { code: 'dry_cleaning', name: 'Dry Cleaning', description: 'Specialised solvent cleaning for delicate fabrics, suits and designer apparel.', rateUnit: 'ITEM', basePrice: 49, leadTimeHours: 72, iconName: 'Shirt' },
+  { code: 'shoe_cleaning', name: 'Shoe Cleaning', description: 'Professional shoe cleaning without harming the material.', rateUnit: 'PAIR', basePrice: 249, leadTimeHours: 48, iconName: 'Footprints' },
   { code: 'stain_removal', name: 'Stain Removal', description: 'Targeted treatment for tough, stubborn fabric spots.', rateUnit: 'SPOT', basePrice: 80, leadTimeHours: 48, iconName: 'Droplets' },
   { code: 'households', name: 'Household', description: 'Heavy-duty wash for sheets, drapes, quilts and thick blankets.', rateUnit: 'ITEM', basePrice: 120, leadTimeHours: 48, iconName: 'BedDouble' },
   { code: 'wet_cleaning', name: 'Wet Cleaning', description: 'Gentle water-based cleaning for garments marked dry-clean-only.', rateUnit: 'ITEM', basePrice: 90, leadTimeHours: 72, iconName: 'Droplets' },
@@ -45,13 +65,41 @@ const ITEMS: { code: string; service: string; name: string; price: number; unit?
   { code: 'si_2', service: 'steam_iron', name: 'T-Shirt', price: 20, iconKey: 'tshirt' },
   { code: 'si_3', service: 'steam_iron', name: 'Trousers / Jeans', price: 30, iconKey: 'jeans' },
   { code: 'si_4', service: 'steam_iron', name: 'Saree Press', price: 50, iconKey: 'saree' },
-  { code: 'dc_1', service: 'dry_cleaning', name: '2-Piece Suit', price: 299, iconKey: 'shirt' },
-  { code: 'dc_2', service: 'dry_cleaning', name: 'Heavy Saree / Lehenga', price: 199, iconKey: 'saree' },
-  { code: 'dc_3', service: 'dry_cleaning', name: 'Blazer / Coat', price: 180, iconKey: 'shirt' },
-  { code: 'dc_4', service: 'dry_cleaning', name: 'Winter Jacket / Sweater', price: 149, iconKey: 'shirt' },
-  { code: 'sc_1', service: 'shoe_cleaning', name: 'Sneakers / Sports Shoes', price: 199, unit: 'pair', iconKey: 'shoes' },
-  { code: 'sc_2', service: 'shoe_cleaning', name: 'Leather Shoes Spa', price: 249, unit: 'pair', iconKey: 'shoes' },
-  { code: 'sc_3', service: 'shoe_cleaning', name: 'Suede / Boots', price: 299, unit: 'pair', iconKey: 'shoes' },
+  // Dry Cleaning Items (Client List: Clothes & Garments + Staples)
+  { code: 'dc_1', service: 'dry_cleaning', name: 'Shirt', price: 99, iconKey: 'shirt' },
+  { code: 'dc_2', service: 'dry_cleaning', name: 'Jeans', price: 99, iconKey: 'jeans' },
+  { code: 'dc_3', service: 'dry_cleaning', name: 'Trouser', price: 99, iconKey: 'jeans' },
+  { code: 'dc_4', service: 'dry_cleaning', name: 'Starch Shirt', price: 129, iconKey: 'shirt' },
+  { code: 'dc_5', service: 'dry_cleaning', name: 'Starch Pant', price: 129, iconKey: 'jeans' },
+  { code: 'dc_6', service: 'dry_cleaning', name: 'T-Shirt', price: 99, iconKey: 'tshirt' },
+  { code: 'dc_7', service: 'dry_cleaning', name: 'Kurta', price: 129, iconKey: 'shirt' },
+  { code: 'dc_8', service: 'dry_cleaning', name: 'Pyjama', price: 129, iconKey: 'jeans' },
+  { code: 'dc_9', service: 'dry_cleaning', name: 'Saree Fancy', price: 249, iconKey: 'saree' },
+  { code: 'dc_10', service: 'dry_cleaning', name: 'Saree Pattu', price: 299, iconKey: 'saree' },
+  { code: 'dc_11', service: 'dry_cleaning', name: 'Designer Saree', price: 349, iconKey: 'saree' },
+  { code: 'dc_12', service: 'dry_cleaning', name: 'Fancy Blouse', price: 49, iconKey: 'shirt' },
+  { code: 'dc_13', service: 'dry_cleaning', name: 'Pattu Blouse', price: 79, iconKey: 'shirt' },
+  { code: 'dc_14', service: 'dry_cleaning', name: 'Designer Blouse', price: 99, iconKey: 'shirt' },
+  { code: 'dc_15', service: 'dry_cleaning', name: 'Lehanga Bottom', price: 249, iconKey: 'saree' },
+  { code: 'dc_16', service: 'dry_cleaning', name: 'Lehanga with Can-Can', price: 349, iconKey: 'saree' },
+  { code: 'dc_17', service: 'dry_cleaning', name: 'Lehanga Blouse', price: 79, iconKey: 'shirt' },
+  { code: 'dc_18', service: 'dry_cleaning', name: 'Lehanga Blouse Designer', price: 129, iconKey: 'shirt' },
+  { code: 'dc_19', service: 'dry_cleaning', name: 'Anarkali', price: 249, iconKey: 'saree' },
+  { code: 'dc_20', service: 'dry_cleaning', name: 'Dupatta', price: 149, iconKey: 'saree' },
+  { code: 'dc_21', service: 'dry_cleaning', name: 'Dupatta Designer', price: 199, iconKey: 'saree' },
+  { code: 'dc_22', service: 'dry_cleaning', name: 'Chunni', price: 79, iconKey: 'saree' },
+  { code: 'dc_23', service: 'dry_cleaning', name: '2-Piece Suit', price: 299, iconKey: 'shirt' },
+  { code: 'dc_24', service: 'dry_cleaning', name: 'Blazer / Coat', price: 180, iconKey: 'shirt' },
+  { code: 'dc_25', service: 'dry_cleaning', name: 'Winter Jacket / Sweater', price: 149, iconKey: 'shirt' },
+  // Shoe Cleaning Items (Client List: Shoes)
+  { code: 'sc_1', service: 'shoe_cleaning', name: 'Canvas (Cloth)', price: 349, unit: 'pair', iconKey: 'shoes' },
+  { code: 'sc_2', service: 'shoe_cleaning', name: 'Leather Shoes', price: 349, unit: 'pair', iconKey: 'shoes' },
+  { code: 'sc_3', service: 'shoe_cleaning', name: 'Formal Shoes', price: 349, unit: 'pair', iconKey: 'shoes' },
+  { code: 'sc_4', service: 'shoe_cleaning', name: 'Sneakers', price: 449, unit: 'pair', iconKey: 'shoes' },
+  { code: 'sc_5', service: 'shoe_cleaning', name: 'Boots', price: 449, unit: 'pair', iconKey: 'shoes' },
+  { code: 'sc_6', service: 'shoe_cleaning', name: 'Hiking Shoes', price: 549, unit: 'pair', iconKey: 'shoes' },
+  { code: 'sc_7', service: 'shoe_cleaning', name: 'Sports Shoes', price: 249, unit: 'pair', iconKey: 'shoes' },
+  { code: 'sc_8', service: 'shoe_cleaning', name: 'Suede Leather Shoes', price: 349, unit: 'pair', iconKey: 'shoes' },
   { code: 'hh_1', service: 'households', name: 'Quilt / Comforter', price: 299, iconKey: 'bedsheet' },
   { code: 'hh_2', service: 'households', name: 'Curtains (Pair)', price: 349, iconKey: 'towel' },
   { code: 'hh_3', service: 'households', name: 'Blanket (Double)', price: 249, iconKey: 'bedsheet' },
@@ -114,7 +162,7 @@ async function main() {
   for (const [i, it] of ITEMS.entries()) {
     await prisma.catalogItem.upsert({
       where: { code: it.code },
-      update: { name: it.name, iconKey: it.iconKey, sortOrder: i + 1 },
+      update: { name: it.name, price: it.price, unit: it.unit ?? 'pc', iconKey: it.iconKey, sortOrder: i + 1 },
       create: { code: it.code, serviceCategoryId: svc(it.service).id, name: it.name, price: it.price, unit: it.unit ?? 'pc', iconKey: it.iconKey, sortOrder: i + 1 },
     });
   }
@@ -151,11 +199,14 @@ async function main() {
   if ((await prisma.faq.count()) === 0) await prisma.faq.createMany({ data: FAQS.map((f, i) => ({ ...f, sortOrder: i + 1 })) });
 
   // ---- users ----------------------------------------------------------------
-  await prisma.user.upsert({
-    where: { email_role: { email: ADMIN_EMAIL, role: 'ADMIN' } },
-    update: {},
-    create: { role: 'ADMIN', email: ADMIN_EMAIL, name: 'Yes Dhobi Admin', passwordHash: await bcrypt.hash(ADMIN_PASSWORD, 10) },
-  });
+  for (const adm of ADMIN_PARTNERS) {
+    const hash = await bcrypt.hash(adm.password, 10);
+    await prisma.user.upsert({
+      where: { email_role: { email: adm.email.toLowerCase(), role: 'ADMIN' } },
+      update: { name: adm.name, passwordHash: hash, status: 'ACTIVE' },
+      create: { role: 'ADMIN', email: adm.email.toLowerCase(), name: adm.name, passwordHash: hash, status: 'ACTIVE' },
+    });
+  }
 
   const zones = await prisma.zone.findMany();
   const zone = (name: string) => zones.find((z) => z.name === name)!;
@@ -242,7 +293,7 @@ async function main() {
   }
 
   console.log(`Done.
-  Admin login    : ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}
+  Partner 1      : vastrasolutionspvtltd@gmail.com / Yesdhobi@1575 (Vastra Solutions)\n  Partner 2      : anirudhailaboina@gmail.com / Anirudh@2026 (Anirudh)
   Vendor login   : 9123456789 / ${DEMO_PASSWORD}   (Star Bright Laundry)
   Rider login    : 9876543210 / ${DEMO_PASSWORD}   (Rahul Yadav)
   Customer OTP   : any phone, OTP 1234 while OTP_DEV_MODE=true`);

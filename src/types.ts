@@ -47,6 +47,7 @@ export interface RegistrationFormData {
 
   // Step 4: Location
   pickupAddress: string;
+  exactShopLocation?: string;
   landmark: string;
   locationPincode: string;
   locationCity: string;

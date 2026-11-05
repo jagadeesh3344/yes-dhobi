@@ -122,10 +122,13 @@ export const Step4Location: React.FC<Step4Props> = ({
 
       <InteractiveMap
         pickupAddress={formData.pickupAddress}
+        exactShopLocation={formData.exactShopLocation || ''}
         landmark={formData.landmark}
         pincode={formData.locationPincode}
         city={formData.locationCity}
         state={formData.locationState}
+        lat={formData.lat ?? 17.3850}
+        lng={formData.lng ?? 78.4867}
         serviceRadius={formData.serviceRadius}
         serviceAreas={formData.serviceAreas || []}
         workingDays={formData.workingDays || []}
@@ -135,6 +138,13 @@ export const Step4Location: React.FC<Step4Props> = ({
         onAddressChange={(val) => {
           updateFormData({ pickupAddress: val });
           clearError('pickupAddress');
+        }}
+        onExactShopLocationChange={(val) => {
+          updateFormData({ exactShopLocation: val });
+          clearError('exactShopLocation');
+        }}
+        onLocationCoordinatesChange={(lat, lng) => {
+          updateFormData({ lat, lng });
         }}
         onLandmarkChange={(val) => {
           updateFormData({ landmark: val });

@@ -31,7 +31,13 @@ adminPeopleRouter.get(
   asyncHandler(async (req, res) => {
     const q = parseQuery(z.object({ search: z.string().optional(), status: userStatus.optional(), tier: z.enum(['REGULAR', 'VIP']).optional() }), req.query);
     const p = parsePagination(req.query);
-    const where: Prisma.CustomerWhereInput = { user: { ...search(q.search), ...(q.status ? { status: q.status } : {}) }, ...(q.tier ? { tier: q.tier } : {}) };
+    const where: Prisma.CustomerWhereInput = {
+      user: {
+        ...search(q.search),
+        ...(q.status ? { status: q.status } : { status: { not: 'INACTIVE' } }),
+      },
+      ...(q.tier ? { tier: q.tier } : {}),
+    };
     const [rows, total] = await Promise.all([
       prisma.customer.findMany({ where, include: customerInclude, orderBy: { createdAt: 'desc' }, skip: p.skip, take: p.limit }),
       prisma.customer.count({ where }),
@@ -120,11 +126,36 @@ adminPeopleRouter.post(
 adminPeopleRouter.delete(
   '/customers/:id',
   asyncHandler(async (req, res) => {
-    const c = await prisma.customer.findUnique({ where: { id: req.params.id } });
+    const rawId = req.params.id;
+    const cleanId = rawId.replace(/^CUST-?/i, '');
+    const numOnly = rawId.replace(/\D/g, '');
+    const c = await prisma.customer.findFirst({
+      where: {
+        OR: [
+          { id: rawId },
+          { id: cleanId },
+          { userId: rawId },
+          ...(numOnly ? [{ referralCode: { contains: numOnly } }] : []),
+        ],
+      },
+    });
     if (!c) throw notFound('Customer');
-    const open = await prisma.order.count({ where: { customerId: c.id, status: { notIn: ['DELIVERED', 'CANCELLED'] } } });
-    if (open > 0) throw conflict(`Customer has ${open} active order(s). Cancel them first.`);
-    // soft delete: keep order history, block login
+
+    const hard = req.query.hard !== 'false';
+    if (hard) {
+      await prisma.order.updateMany({
+        where: { customerId: c.id, status: { notIn: ['DELIVERED', 'CANCELLED'] } },
+        data: { status: 'CANCELLED', cancelReason: 'Customer account deleted' },
+      });
+      await prisma.address.deleteMany({ where: { customerId: c.id } });
+      await prisma.walletTransaction.deleteMany({ where: { customerId: c.id } });
+      await prisma.promotionRedemption.deleteMany({ where: { customerId: c.id } });
+      await prisma.customer.delete({ where: { id: c.id } });
+      await prisma.user.delete({ where: { id: c.userId } }).catch(() => {});
+      res.json({ message: 'Customer permanently deleted' });
+      return;
+    }
+
     await prisma.user.update({ where: { id: c.userId }, data: { status: 'INACTIVE', phone: null, email: null } });
     await revokeAllUserTokens(c.userId);
     res.json({ message: 'Customer deactivated' });
@@ -153,7 +184,10 @@ adminPeopleRouter.get(
     const q = parseQuery(z.object({ search: z.string().optional(), availability: z.enum(['ONLINE', 'OFFLINE', 'ON_DELIVERY']).optional(), zoneId: z.coerce.number().optional(), onboardingStatus: z.string().optional() }), req.query);
     const p = parsePagination(req.query);
     const where: Prisma.RiderWhereInput = {
-      user: search(q.search),
+      user: {
+        ...search(q.search),
+        status: { not: 'INACTIVE' },
+      },
       ...(q.availability ? { availability: q.availability } : {}),
       ...(q.zoneId ? { zoneId: q.zoneId } : {}),
       ...(q.onboardingStatus ? { onboardingStatus: q.onboardingStatus as never } : {}),
@@ -261,10 +295,33 @@ adminPeopleRouter.patch(
 adminPeopleRouter.delete(
   '/riders/:id',
   asyncHandler(async (req, res) => {
-    const r = await prisma.rider.findUnique({ where: { id: req.params.id } });
+    const rawId = req.params.id;
+    const cleanId = rawId.replace(/^RDR-?/i, '');
+    const r = await prisma.rider.findFirst({
+      where: {
+        OR: [
+          { id: rawId },
+          { id: cleanId },
+          { userId: rawId },
+        ],
+      },
+    });
     if (!r) throw notFound('Rider');
-    const active = await prisma.order.count({ where: { OR: [{ pickupRiderId: r.id }, { deliveryRiderId: r.id }], status: { in: ['ASSIGNED', 'PICKED_UP', 'OUT_FOR_DELIVERY'] } } });
-    if (active > 0) throw conflict(`Rider has ${active} active delivery(ies). Reassign them first.`);
+
+    const hard = req.query.hard !== 'false';
+    if (hard) {
+      await prisma.order.updateMany({ where: { pickupRiderId: r.id }, data: { pickupRiderId: null } });
+      await prisma.order.updateMany({ where: { deliveryRiderId: r.id }, data: { deliveryRiderId: null } });
+      await prisma.pickupRequest.deleteMany({ where: { riderId: r.id } });
+      await prisma.ledgerEntry.deleteMany({ where: { riderId: r.id } });
+      await prisma.payout.deleteMany({ where: { riderId: r.id } });
+      await prisma.verification.deleteMany({ where: { riderId: r.id } });
+      await prisma.rider.delete({ where: { id: r.id } });
+      await prisma.user.delete({ where: { id: r.userId } }).catch(() => {});
+      res.json({ message: 'Rider permanently deleted' });
+      return;
+    }
+
     await prisma.$transaction([
       prisma.rider.update({ where: { id: r.id }, data: { availability: 'OFFLINE' } }),
       prisma.user.update({ where: { id: r.userId }, data: { status: 'INACTIVE', phone: null, email: null } }),
@@ -290,7 +347,7 @@ adminPeopleRouter.get(
     const p = parsePagination(req.query);
     const where: Prisma.VendorWhereInput = {
       ...(q.search ? { OR: [{ shopName: { contains: q.search, mode: 'insensitive' } }, { ownerName: { contains: q.search, mode: 'insensitive' } }, { user: search(q.search) }] } : {}),
-      ...(q.status ? { status: q.status } : {}),
+      ...(q.status ? { status: q.status } : { status: { not: 'SUSPENDED' }, user: { status: { not: 'INACTIVE' } } }),
       ...(q.city ? { city: { equals: q.city, mode: 'insensitive' } } : {}),
       ...(q.zoneId ? { zones: { some: { zoneId: q.zoneId } } } : {}),
     };
@@ -445,10 +502,37 @@ adminPeopleRouter.patch(
 adminPeopleRouter.delete(
   '/vendors/:id',
   asyncHandler(async (req, res) => {
-    const v = await prisma.vendor.findUnique({ where: { id: req.params.id } });
+    const rawId = req.params.id;
+    const cleanId = rawId.replace(/^VDR-?/i, 'VD');
+    const numOnly = rawId.replace(/\D/g, '');
+    const v = await prisma.vendor.findFirst({
+      where: {
+        OR: [
+          { id: rawId },
+          { registrationId: rawId },
+          { registrationId: cleanId },
+          ...(numOnly ? [{ registrationId: `VD${numOnly}` }, { registrationId: `VD1000${numOnly.slice(-2)}` }] : []),
+        ],
+      },
+    });
     if (!v) throw notFound('Vendor');
-    const active = await prisma.order.count({ where: { vendorId: v.id, status: { notIn: ['DELIVERED', 'CANCELLED'] } } });
-    if (active > 0) throw conflict(`Vendor has ${active} active order(s). Reassign them first.`);
+
+    const hard = req.query.hard !== 'false';
+    if (hard) {
+      await prisma.order.updateMany({ where: { vendorId: v.id }, data: { vendorId: null } });
+      await prisma.vendorRequest.deleteMany({ where: { vendorId: v.id } });
+      await prisma.vendorService.deleteMany({ where: { vendorId: v.id } });
+      await prisma.vendorZone.deleteMany({ where: { vendorId: v.id } });
+      await prisma.vendorEquipment.deleteMany({ where: { vendorId: v.id } });
+      await prisma.payout.deleteMany({ where: { vendorId: v.id } });
+      await prisma.ledgerEntry.deleteMany({ where: { vendorId: v.id } });
+      await prisma.verification.deleteMany({ where: { vendorId: v.id } });
+      await prisma.vendor.delete({ where: { id: v.id } });
+      await prisma.user.delete({ where: { id: v.userId } }).catch(() => {});
+      res.json({ message: 'Vendor permanently deleted' });
+      return;
+    }
+
     await prisma.$transaction([
       prisma.vendor.update({ where: { id: v.id }, data: { status: 'SUSPENDED' } }),
       prisma.user.update({ where: { id: v.userId }, data: { status: 'INACTIVE', phone: null, email: null } }),

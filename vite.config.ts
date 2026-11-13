@@ -5,6 +5,10 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // The vendor onboarding form is served at yesdhobi.com/vendoronboarding,
+    // under the customer web app which owns the root. Assets have to resolve
+    // under that path or the page loads blank.
+    base: '/vendoronboarding/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

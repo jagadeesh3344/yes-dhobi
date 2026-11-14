@@ -1,4 +1,5 @@
 import { RegistrationFormData, ServiceItem } from '../types';
+import { fetchZones, resolveZoneIds, Zone } from './zonesApi';
 
 export const PRIMARY_API_ENDPOINT = '/api/v1/vendors';
 export const DIRECT_ALB_ENDPOINT = 'http://yesdhobi-alb-648458477.ap-southeast-2.elb.amazonaws.com/api/v1/vendors';
@@ -27,19 +28,6 @@ const EQUIPMENT_ID_MAP: Record<string, number> = {
   'Dry Iron': 9,
 };
 
-const ZONE_MAP: Record<string, number> = {
-  'Lajpat Nagar': 1,
-  'Saket': 2,
-  'Hauz Khas': 3,
-  'Karol Bagh': 4,
-  'Dwarka': 5,
-  'Rohini': 6,
-  'Connaught Place': 7,
-  'Janakpuri': 8,
-  'Vasant Kunj': 9,
-  'Greater Kailash': 10,
-};
-
 const DAY_MAP: Record<string, number> = {
   Mon: 1,
   Monday: 1,
@@ -57,15 +45,26 @@ const DAY_MAP: Record<string, number> = {
   Sunday: 7,
 };
 
-function formatIsoDate(dateStr: string): string {
-  if (!dateStr) return '1990-01-01T00:00:00.000Z';
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return '1990-01-01T00:00:00.000Z';
-    return d.toISOString();
-  } catch {
-    return '1990-01-01T00:00:00.000Z';
-  }
+/**
+ * Trimmed value, or undefined when the vendor left the field blank.
+ *
+ * Every optional field goes through this instead of a stand-in value. The
+ * payload builder used to fall back to demo data (a made-up Aadhaar number, a
+ * made-up GSTIN, example.com document links, "John Doe" as the account
+ * holder), which meant a blank field reached the backend as a real-looking
+ * answer and an admin approved KYC against data nobody had entered.
+ */
+function opt(val: string | undefined | null): string | undefined {
+  if (typeof val !== 'string') return undefined;
+  const trimmed = val.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function formatIsoDate(dateStr: string): string | undefined {
+  const raw = opt(dateStr);
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  return isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
 function formatTimeString(timeStr: string, defaultTime: string): string {
@@ -87,162 +86,160 @@ function parseNumber(val: string | number | undefined | null, fallback = 0): num
   return isNaN(parsed) ? fallback : parsed;
 }
 
-function parseYearsExperience(val: string): number {
-  if (!val) return 1;
+function parseOptionalNumber(val: string | number | undefined | null): number | undefined {
+  if (typeof val === 'number') return isNaN(val) ? undefined : val;
+  if (!opt(val as string)) return undefined;
+  const parsed = parseFloat(String(val).replace(/[^0-9.]/g, ''));
+  return isNaN(parsed) ? undefined : parsed;
+}
+
+function parseYearsExperience(val: string): number | undefined {
+  if (!opt(val)) return undefined;
   if (val.includes('1 - 2')) return 2;
   if (val.includes('3 - 5')) return 5;
   if (val.includes('5+')) return 5;
   if (val.includes('Under 1')) return 1;
-  return parseNumber(val, 1);
+  return parseOptionalNumber(val);
 }
 
-function parseDailyCapacityKg(val: string): number {
-  if (!val) return 50.0;
+function parseDailyCapacityKg(val: string): number | undefined {
+  if (!opt(val)) return undefined;
   if (val.includes('Under 50')) return 40.0;
   if (val.includes('50-100')) return 50.0;
   if (val.includes('100-200')) return 100.0;
   if (val.includes('200+')) return 200.0;
-  return parseNumber(val, 50.0);
+  return parseOptionalNumber(val);
 }
 
-function formatMobileNumber(num: string): string {
-  if (!num) return '+919876543210';
-  const digits = num.replace(/\D/g, '');
-  if (num.startsWith('+')) return num;
+/** Normalises to +91XXXXXXXXXX, or undefined when nothing usable was entered. */
+function formatMobileNumber(num: string): string | undefined {
+  const raw = opt(num);
+  if (!raw) return undefined;
+  const digits = raw.replace(/\D/g, '');
+  if (raw.startsWith('+')) return raw;
+  if (!digits) return undefined;
   if (digits.length === 10) return `+91${digits}`;
-  return `+${digits || '919876543210'}`;
+  return `+${digits}`;
 }
 
-export function transformFormDataToApiPayload(formData: RegistrationFormData) {
+/** Drops every key whose value is undefined so blanks are omitted, not faked. */
+function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as Partial<T>;
+}
+
+export function transformFormDataToApiPayload(formData: RegistrationFormData, zones: Zone[] = []) {
   // 1. Personal details
-  const personalDetails = {
-    fullName: formData.fullName || 'John Doe',
+  const personalDetails = compact({
+    fullName: opt(formData.fullName),
     mobileNumber: formatMobileNumber(formData.mobileNumber),
-    whatsappNumber: formData.whatsappNumber || formData.mobileNumber || '9876543210',
-    emailAddress: formData.email || 'vendor@yesdhobi.com',
+    whatsappNumber: formData.whatsappSameAsMobile
+      ? formatMobileNumber(formData.mobileNumber)
+      : formatMobileNumber(formData.whatsappNumber),
+    emailAddress: opt(formData.email),
     dateOfBirth: formatIsoDate(formData.dob),
-    gender: formData.gender || 'Male',
-    personalPincode: formData.pincode || '110024',
-    personalCity: formData.city || 'New Delhi',
-    personalState: formData.state || 'Delhi',
-    currentAddress: formData.currentAddress || '123 Main Street, Phase 1',
-    aadhaarNumber: formData.aadhaarNumber || '123456781234',
-    profilePhotoUrl: formData.profilePhoto || 'https://example.com/photo.jpg',
-  };
+    gender: opt(formData.gender),
+    personalPincode: opt(formData.pincode),
+    personalCity: opt(formData.city),
+    personalState: opt(formData.state),
+    currentAddress: opt(formData.currentAddress),
+    aadhaarNumber: opt(formData.aadhaarNumber),
+    profilePhotoUrl: opt(formData.profilePhoto as string | undefined),
+  });
 
   // 2. Business details
-  const businessDetails = {
-    shopName: formData.shopName || 'Super Clean Laundry',
-    isExistingFranchise: formData.isExistingFranchise === 'Yes',
-    franchiseName: formData.franchiseName || 'YesDhobi Partner',
-    businessType: formData.businessType || 'Proprietorship',
+  const isFranchise = formData.isExistingFranchise === 'Yes';
+  const businessDetails = compact({
+    shopName: opt(formData.shopName),
+    isExistingFranchise: isFranchise,
+    // Only meaningful when they said they already run a franchise.
+    franchiseName: isFranchise ? opt(formData.franchiseName) : undefined,
+    businessType: opt(formData.businessType),
     yearsOfExperience: parseYearsExperience(formData.yearsExperience),
-    numberOfWorkers: parseNumber(formData.numberOfWorkers, 4),
-    hasOwnShop: formData.hasOwnShop === 'Yes',
-    shopAreaSqft: parseNumber(formData.shopAreaSqFt, 250.5),
-    numberOfWashingMachines: parseNumber(formData.numberOfWashingMachines, 3),
+    numberOfWorkers: parseOptionalNumber(formData.numberOfWorkers),
+    hasOwnShop: formData.hasOwnShop ? formData.hasOwnShop === 'Yes' : undefined,
+    shopAreaSqft: parseOptionalNumber(formData.shopAreaSqFt),
+    numberOfWashingMachines: parseOptionalNumber(formData.numberOfWashingMachines),
     dailyCapacityKg: parseDailyCapacityKg(formData.dailyCapacity),
-    gstNumber: formData.gstNumber || '22AAAAA0000A1Z5',
-    panNumber: formData.panNumber || 'ABCDE1234F',
-    standardDeliveryTime: formData.standardDeliveryTime || '48 Hours',
+    // GST is genuinely optional for small shops; a blank one must stay blank.
+    gstNumber: opt(formData.gstNumber)?.toUpperCase(),
+    panNumber: opt(formData.panNumber)?.toUpperCase(),
+    standardDeliveryTime: opt(formData.standardDeliveryTime),
     offersExpressDelivery: Boolean(formData.offerExpressDelivery),
-    expressDeliveryChargePercentage: parseNumber(formData.expressPriceMarkup, 15.0),
-  };
+    expressDeliveryChargePercentage: formData.offerExpressDelivery
+      ? parseOptionalNumber(formData.expressPriceMarkup)
+      : undefined,
+  });
 
   // 3. Location
-  const location = {
-    shopAddress: formData.pickupAddress || formData.exactShopLocation || formData.currentAddress || 'Shop 12, Market Complex',
-    landmark: formData.landmark || 'Near Metro Station',
-    pincode: formData.locationPincode || formData.pincode || '500013',
-    city: formData.locationCity || formData.city || 'Hyderabad',
-    state: formData.locationState || formData.state || 'Telangana',
-    latitude: typeof formData.lat === 'number' && !isNaN(formData.lat) ? formData.lat : 17.3850,
-    longitude: typeof formData.lng === 'number' && !isNaN(formData.lng) ? formData.lng : 78.4867,
+  const location = compact({
+    shopAddress: opt(formData.pickupAddress) || opt(formData.exactShopLocation) || opt(formData.currentAddress),
+    landmark: opt(formData.landmark),
+    pincode: opt(formData.locationPincode) || opt(formData.pincode),
+    city: opt(formData.locationCity) || opt(formData.city),
+    state: opt(formData.locationState) || opt(formData.state),
+    latitude: typeof formData.lat === 'number' && !isNaN(formData.lat) ? formData.lat : undefined,
+    longitude: typeof formData.lng === 'number' && !isNaN(formData.lng) ? formData.lng : undefined,
     serviceRadiusKm: parseNumber(formData.serviceRadius, 5.0),
     workingHoursFrom: formatTimeString(formData.workingHoursFrom, '08:00:00'),
     workingHoursTo: formatTimeString(formData.workingHoursTo, '19:00:00'),
-  };
+  });
 
-  // 4. Documents
-  const documents = {
-    aadhaarFrontUrl: formData.aadhaarFront || 'https://example.com/aadhar-front.jpg',
-    aadhaarBackUrl: formData.aadhaarBack || 'https://example.com/aadhar-back.jpg',
-    panFrontUrl: formData.panFront || 'https://example.com/pan.jpg',
-    shopPhotoUrl: formData.shopPhoto || 'https://example.com/shop.jpg',
-    gstCertificateUrl: formData.gstCertificate || 'https://example.com/gst.jpg',
-    tradeLicenseUrl: formData.tradeLicense || 'https://example.com/trade.jpg',
-    labourLicenseUrl: formData.labourLicense || 'https://example.com/labour.jpg',
-  };
+  // 4. Documents — only the ones actually uploaded.
+  const documents = compact({
+    aadhaarFrontUrl: opt(formData.aadhaarFront as string | undefined),
+    aadhaarBackUrl: opt(formData.aadhaarBack as string | undefined),
+    panFrontUrl: opt(formData.panFront as string | undefined),
+    shopPhotoUrl: opt(formData.shopPhoto as string | undefined),
+    gstCertificateUrl: opt(formData.gstCertificate as string | undefined),
+    tradeLicenseUrl: opt(formData.tradeLicense as string | undefined),
+    labourLicenseUrl: opt(formData.labourLicense as string | undefined),
+  });
 
-  // 5. Bank Details
-  const bankDetails = {
-    bankAccountHolderName: formData.accountHolderName || formData.fullName || 'John Doe',
-    bankName: formData.bankName || 'HDFC Bank',
-    bankAccountNumber: formData.accountNumber || '50100234567890',
-    bankIfscCode: formData.ifscCode || 'HDFC0001234',
-    bankAccountType: formData.accountType || 'Current',
-    cancelledChequePassbookUrl: formData.cancelledCheque || 'https://example.com/cheque.jpg',
-  };
+  // 5. Bank details
+  const bankDetails = compact({
+    bankAccountHolderName: opt(formData.accountHolderName),
+    bankName: opt(formData.bankName),
+    bankAccountNumber: opt(formData.accountNumber),
+    bankIfscCode: opt(formData.ifscCode)?.toUpperCase(),
+    bankAccountType: opt(formData.accountType),
+    cancelledChequePassbookUrl: opt(formData.cancelledCheque as string | undefined),
+  });
 
-  // 6. Services
+  // 6. Services — exactly what they enabled and priced.
   const servicesList = Object.values(formData.services || {});
-  let services = servicesList
+  const services = servicesList
     .filter((srv: ServiceItem) => srv.enabled)
     .map((srv: ServiceItem) => {
-      const numericId = SERVICE_ID_MAP[srv.id] || parseInt(srv.id, 10) || 1;
+      const numericId = SERVICE_ID_MAP[srv.id] || parseInt(srv.id, 10);
       return {
-        serviceId: numericId,
-        price: typeof srv.price === 'number' ? srv.price : parseNumber(srv.price, 50.0),
+        serviceId: Number.isInteger(numericId) && numericId > 0 ? numericId : srv.id,
+        price: typeof srv.price === 'number' ? srv.price : parseNumber(srv.price, 0),
         isEnabled: true,
       };
-    });
+    })
+    .filter((srv) => srv.price > 0);
 
-  if (services.length === 0) {
-    services = [
-      {
-        serviceId: 1,
-        price: 50.0,
-        isEnabled: true,
-      },
-    ];
-  }
+  // 7. Equipment
+  const equipments = (formData.equipmentOwned || [])
+    .map((eqName) => {
+      const eqId = EQUIPMENT_ID_MAP[eqName];
+      if (!eqId) return null;
+      const qty = eqName === 'Washing Machine' ? parseNumber(formData.numberOfWashingMachines, 1) : 1;
+      return { equipmentId: eqId, quantity: Math.max(1, Math.round(qty)) };
+    })
+    .filter((e): e is { equipmentId: number; quantity: number } => e !== null);
 
-  // 7. Equipments
-  const equipmentOwnedList = formData.equipmentOwned || [];
-  const equipments = equipmentOwnedList.map((eqName) => {
-    const eqId = EQUIPMENT_ID_MAP[eqName] || 1;
-    const qty = eqName === 'Washing Machine' ? parseNumber(formData.numberOfWashingMachines, 2) : 1;
-    return {
-      equipmentId: eqId,
-      quantity: qty || 1,
-    };
-  });
+  // 8. Service areas — resolved against the zones the backend reported.
+  const serviceAreas = resolveZoneIds(formData.serviceAreas || [], zones);
 
-  if (equipments.length === 0) {
-    equipments.push({ equipmentId: 1, quantity: 2 });
-  }
-
-  // 8. Service Areas
-  const rawAreas = formData.serviceAreas || [];
-  const serviceAreas = rawAreas.map((area) => {
-    if (typeof area === 'number') return area;
-    if (ZONE_MAP[area]) return ZONE_MAP[area];
-    const parsed = parseInt(area, 10);
-    return isNaN(parsed) ? 1 : parsed;
-  });
-  if (serviceAreas.length === 0) serviceAreas.push(1);
-
-  // 9. Working Days
-  const rawDays = formData.workingDays || [];
-  const workingDays = rawDays.map((day) => {
-    if (typeof day === 'number') return day;
-    if (DAY_MAP[day]) return DAY_MAP[day];
-    const parsed = parseInt(day, 10);
-    return isNaN(parsed) ? 1 : parsed;
-  });
-  if (workingDays.length === 0) {
-    workingDays.push(1, 2, 3, 4, 5, 6);
-  }
+  // 9. Working days
+  const workingDays = (formData.workingDays || [])
+    .map((day) => (typeof day === 'number' ? day : DAY_MAP[day] ?? parseInt(day, 10)))
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
 
   return {
     personalDetails,
@@ -262,10 +259,15 @@ export function transformFormDataToApiPayload(formData: RegistrationFormData) {
 }
 
 export async function submitVendorRegistration(formData: RegistrationFormData) {
-  const payload = transformFormDataToApiPayload(formData);
-  console.log('Submitting payload to YesDhobi API:', JSON.stringify(payload, null, 2));
+  // Zone ids are resolved from the API so a selected area maps to the zone the
+  // vendor actually picked.
+  const zones = await fetchZones().catch(() => [] as Zone[]);
+  const payload = transformFormDataToApiPayload(formData, zones);
 
-  // First try direct API endpoint
+  // The payload carries Aadhaar and bank account numbers plus base64 document
+  // scans, so it is never written to the browser console.
+
+  // First try the same-origin API path (proxied to the backend).
   try {
     const response = await fetch(PRIMARY_API_ENDPOINT, {
       method: 'POST',
@@ -292,7 +294,7 @@ export async function submitVendorRegistration(formData: RegistrationFormData) {
     // Try fallback direct ALB endpoint if relative URL failed
     return await submitToFallbackEndpoint(payload, errorMsg);
   } catch (err: any) {
-    console.warn('Primary fetch failed, trying fallback ALB endpoint:', err);
+    console.warn('Primary vendor registration request failed, trying fallback endpoint');
     return await submitToFallbackEndpoint(payload, err?.message || 'Network error');
   }
 }

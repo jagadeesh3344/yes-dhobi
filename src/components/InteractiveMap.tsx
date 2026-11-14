@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Navigation, Search, Loader2, CheckCircle2, Crosshair, Building, X, AlertCircle } from 'lucide-react';
+import { fetchZones, Zone } from '../utils/zonesApi';
 
 interface InteractiveMapProps {
   pickupAddress: string;
@@ -29,28 +30,6 @@ interface InteractiveMapProps {
   onHoursFromChange: (val: string) => void;
   onHoursToChange: (val: string) => void;
 }
-
-const availableZones = [
-  'Lajpat Nagar',
-  'Saket',
-  'Hauz Khas',
-  'Karol Bagh',
-  'Dwarka',
-  'Rohini',
-  'Connaught Place',
-  'Janakpuri',
-  'Vasant Kunj',
-  'Greater Kailash',
-  'Madhapur',
-  'Gachibowli',
-  'Banjara Hills',
-  'Jubilee Hills',
-  'Kukatpally',
-  'Hitec City',
-  'Kondapur',
-  'Ameerpet',
-  'Secunderabad'
-];
 
 const allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -148,6 +127,42 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
   // Fallback pin position if Leaflet tiles are still initializing
   const [fallbackPin, setFallbackPin] = useState({ x: 50, y: 50 });
+
+  // Serviceable zones come from the backend so a vendor can only pick an area
+  // that exists, and the selection maps to the right zone on submit.
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [zonesLoading, setZonesLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    fetchZones()
+      .then((rows) => {
+        if (active) setZones(rows);
+      })
+      .finally(() => {
+        if (active) setZonesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Zones grouped by city, with the vendor's own city first.
+  const zonesByCity = React.useMemo(() => {
+    const groups = new Map<string, Zone[]>();
+    for (const zone of zones) {
+      const key = zone.city || 'Other';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(zone);
+    }
+    const typedCity = (city || '').trim().toLowerCase();
+    return [...groups.entries()].sort(([a], [b]) => {
+      const aMatch = a.toLowerCase() === typedCity;
+      const bMatch = b.toLowerCase() === typedCity;
+      if (aMatch !== bMatch) return aMatch ? -1 : 1;
+      return a.localeCompare(b);
+    });
+  }, [zones, city]);
 
   // Sync search input if exactShopLocation prop changes from outside
   useEffect(() => {
@@ -903,25 +918,46 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         <label className="block text-xs font-bold text-slate-800 mb-1.5">
           Service Area Zones
         </label>
-        <div className="flex flex-wrap gap-2">
-          {availableZones.map((zone) => {
-            const isSelected = serviceAreas.includes(zone);
-            return (
-              <button
-                key={zone}
-                type="button"
-                onClick={() => toggleZone(zone)}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
-                  isSelected
-                    ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                {zone}
-              </button>
-            );
-          })}
-        </div>
+        {zonesLoading ? (
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Loading serviceable zones...
+          </div>
+        ) : zonesByCity.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            No service zones are configured yet. You can continue — our team will set your
+            coverage area during verification.
+          </p>
+        ) : (
+          <div className="space-y-2.5">
+            {zonesByCity.map(([cityName, cityZones]) => (
+              <div key={cityName}>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">
+                  {cityName}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {cityZones.map((zone) => {
+                    const isSelected = serviceAreas.includes(zone.name);
+                    return (
+                      <button
+                        key={zone.id}
+                        type="button"
+                        onClick={() => toggleZone(zone.name)}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                          isSelected
+                            ? 'bg-blue-700 text-white border-blue-700 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        {zone.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         <p className="text-[11px] text-slate-500 mt-1.5">Select specific zones you service</p>
       </div>
 

@@ -9,6 +9,14 @@
       "destination": "http://yesdhobi-alb-648458477.ap-southeast-2.elb.amazonaws.com/webhook/:path*"
     },
     {
+      "source": "/vendoronboarding/assets/:path*",
+      "destination": "/assets/:path*"
+    },
+    {
+      "source": "/vendoronboarding/:file(.*\\..*)",
+      "destination": "/:file"
+    },
+    {
       "source": "/vendoronboarding/(.*)",
       "destination": "/index.html"
     },

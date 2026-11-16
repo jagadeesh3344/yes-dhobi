@@ -396,6 +396,10 @@ model CatalogItem {
   code              String   @unique
   serviceCategoryId Int
   name              String
+  /// Groups items inside one service, e.g. Men / Women / Kids under dry
+  /// cleaning. The customer app renders these as tabs; null means the service
+  /// shows a flat list.
+  subCategory       String?
   price             Decimal  @db.Decimal(10, 2)
   unit              String   @default("pc")
   iconKey           String   @default("shirt")

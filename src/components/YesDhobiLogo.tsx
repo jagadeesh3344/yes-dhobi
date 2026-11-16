@@ -1,4 +1,7 @@
 import React from 'react';
+import logoTransparent from '../assets/images/yesdhobi-official-logo-transparent.png';
+import logoWhite from '../assets/images/yesdhobi-official-logo-white.png';
+import logoFallback from '../assets/images/Screenshot 2026-10-05 090933.png';
 
 interface YesDhobiLogoProps {
   className?: string;
@@ -8,8 +11,7 @@ interface YesDhobiLogoProps {
 
 /**
  * YesDhobiLogo
- * Strictly renders the official provided YesDhobi logo image file:
- * "Screenshot 2026-10-05 090933"
+ * Strictly renders the official provided YesDhobi logo image file.
  * Preserves exact aspect ratio, typography, colors, and proportions.
  * Uses object-fit: contain (never cover, no crop, no distortion, no mirroring).
  */
@@ -18,9 +20,7 @@ export const YesDhobiLogo: React.FC<YesDhobiLogoProps> = ({
   variant = 'navy',
   alt = 'Yes Dhobi'
 }) => {
-  const src = variant === 'white'
-    ? '/yesdhobi-official-logo-white.png'
-    : '/yesdhobi-official-logo-transparent.png';
+  const src = variant === 'white' ? logoWhite : logoTransparent;
 
   return (
     <img
@@ -28,8 +28,8 @@ export const YesDhobiLogo: React.FC<YesDhobiLogoProps> = ({
       alt={alt}
       onError={(e) => {
         const target = e.currentTarget;
-        if (target.src.includes('yesdhobi-official-logo-transparent')) {
-          target.src = '/Screenshot 2026-10-05 090933.png';
+        if (target.src !== logoFallback) {
+          target.src = logoFallback;
         }
       }}
       className={`${className} object-contain select-none`}

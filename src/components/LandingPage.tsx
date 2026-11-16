@@ -65,7 +65,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartRegistration })
             </h1>
 
             <p className="text-base sm:text-lg text-slate-300 max-w-2xl leading-relaxed">
-              Join 5,000+ laundry partners across India earning ₹40,000–₹80,000 monthly with guaranteed weekly payouts.
+              Join the Yes Dhobi laundry partner network in Hyderabad, earning ₹40,000–₹80,000 monthly with guaranteed weekly payouts.
             </p>
 
             <div className="pt-2 flex flex-col items-start gap-4">

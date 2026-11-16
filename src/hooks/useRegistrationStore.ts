@@ -32,7 +32,7 @@ export const initialServicesData = {
   dry_iron: {
     id: 'dry_iron',
     name: 'Dry Iron',
-    description: 'Professional steam pressing for wrinkle-free crisp garments.',
+    description: 'Dry pressing without steam for everyday cottons and linens.',
     enabled: false,
     price: 10,
     unit: 'Per piece (₹)'
@@ -72,7 +72,7 @@ export const initialServicesData = {
   wet_cleaning: {
     id: 'wet_cleaning',
     name: 'Wet Cleaning',
-    description: 'Special heavy-duty wash for sheets, drapes, and thick blankets.',
+    description: 'Gentle water-based cleaning for delicates that cannot be dry cleaned.',
     enabled: false,
     price: 90,
     unit: 'Per piece (₹)'

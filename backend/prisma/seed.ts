@@ -206,7 +206,9 @@ const ITEMS: { code: string; service: string; name: string; price: number; unit?
   { code: 'hh_c_1', service: 'households', name: 'Carpet Cleaning', price: 30, unit: 'sq.ft', iconKey: 'carpet' },
 ];
 
-// ids 1..10 match ZONE_MAP in the vendor web app; the rest come from the admin demo data
+// Zone ids are no longer mirrored in client code: the vendor web app reads
+// GET /api/v1/catalog/zones and sends back the ids it was given, so zones can
+// be added here (or by an admin) without a front-end change.
 const ZONES = [
   { name: 'Lajpat Nagar', city: 'New Delhi', state: 'Delhi', centerLat: 28.5677, centerLng: 77.2433 },
   { name: 'Saket', city: 'New Delhi', state: 'Delhi', centerLat: 28.5245, centerLng: 77.2066 },
@@ -226,6 +228,17 @@ const ZONES = [
   { name: 'Bandra', city: 'Mumbai', state: 'Maharashtra', centerLat: 19.0596, centerLng: 72.8295 },
   { name: 'Kothrud', city: 'Pune', state: 'Maharashtra', centerLat: 18.5074, centerLng: 73.8077 },
   { name: 'Viman Nagar', city: 'Pune', state: 'Maharashtra', centerLat: 18.5679, centerLng: 73.9143 },
+  // Hyderabad is the city we actually operate in, but it had no zones at all,
+  // so a Hyderabad vendor had no serviceable area to pick during onboarding.
+  { name: 'Madhapur', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4486, centerLng: 78.3908 },
+  { name: 'Gachibowli', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4401, centerLng: 78.3489 },
+  { name: 'Hitec City', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4435, centerLng: 78.3772 },
+  { name: 'Kondapur', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4615, centerLng: 78.3639 },
+  { name: 'Banjara Hills', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4126, centerLng: 78.4448 },
+  { name: 'Jubilee Hills', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4305, centerLng: 78.4073 },
+  { name: 'Kukatpally', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4849, centerLng: 78.4138 },
+  { name: 'Ameerpet', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4375, centerLng: 78.4483 },
+  { name: 'Secunderabad', city: 'Hyderabad', state: 'Telangana', centerLat: 17.4399, centerLng: 78.4983 },
 ];
 
 // ids 1..9 match EQUIPMENT_ID_MAP in the vendor web app

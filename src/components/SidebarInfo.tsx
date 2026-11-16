@@ -12,7 +12,7 @@ export const SidebarInfo: React.FC<SidebarInfoProps> = ({ currentStep }) => {
     switch (currentStep) {
       case 1:
         return {
-          title: 'Join 5,000+ laundry partners across India',
+          title: 'Join the Yes Dhobi laundry partner network in Hyderabad',
           subtitle: 'Complete your profile in minutes. We\'ll verify your details and get you live on the platform.',
           stepBadge: '1. Personal Details',
           stepDesc: 'Tell us about yourself and your contact details.',
@@ -38,7 +38,7 @@ export const SidebarInfo: React.FC<SidebarInfoProps> = ({ currentStep }) => {
       case 5:
       default:
         return {
-          title: 'Join 5,000+ laundry partners across India',
+          title: 'Join the Yes Dhobi laundry partner network in Hyderabad',
           subtitle: 'Almost there! Complete your location and verification details to start getting orders directly in your area.',
           stepBadge: `${currentStep}. ${currentStep === 4 ? 'Location' : 'Documents & Verification'}`,
           stepDesc: 'Provide accurate details to ensure faster onboarding verification and approval.',

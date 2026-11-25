@@ -950,9 +950,100 @@ async function flagLateVendorSearches(now: Date) {
   }
 }
 
+/**
+ * Tell admins once about a rider search that has been active without acceptance.
+ */
+async function flagLateRiderSearches(now: Date) {
+  const cutoff = dayjs(now).subtract(90, 'second').toDate();
+  const late = await prisma.dispatch.findMany({
+    where: {
+      kind: { in: ['RIDER_PICKUP', 'RIDER_DELIVERY'] },
+      status: 'ACTIVE',
+      lateFlaggedAt: null,
+      createdAt: { lt: cutoff },
+    },
+    select: { id: true, orderId: true, kind: true, cursor: true, candidates: true },
+  });
+  for (const d of late) {
+    await prisma.dispatch.update({ where: { id: d.id }, data: { lateFlaggedAt: now } });
+    const order = await prisma.order.findUnique({ where: { id: d.orderId }, select: { orderNumber: true } });
+    const legText = d.kind === 'RIDER_PICKUP' ? 'pickup' : 'delivery';
+    await notifyAdmins({
+      title: `Rider ${legText} still unassigned`,
+      message: `Order ${order?.orderNumber ?? d.orderId} has been looking for a ${legText} rider for >90s (${d.cursor} of ${d.candidates.length} tried). Assign one manually if urgent.`,
+      type: 'RIDER',
+      data: { orderId: d.orderId, kind: d.kind },
+    });
+  }
+}
+
+/**
+ * Periodically retry unassigned orders that exhausted their candidate list or had no initial riders nearby.
+ * Retries up to 4 times (every 2 minutes). If still unassigned after 10+ minutes, escalates to admins.
+ */
+let lastRetrySweep = 0;
+async function retryUnassignedRiderOrders(now: Date) {
+  const nowMs = now.getTime();
+  if (nowMs - lastRetrySweep < 45_000) return;
+  lastRetrySweep = nowMs;
+
+  const retryCutoff = dayjs(now).subtract(2, 'minute').toDate();
+  const escalationCutoff = dayjs(now).subtract(10, 'minute').toDate();
+
+  const pendingOrders = await prisma.order.findMany({
+    where: {
+      status: 'PENDING_PICKUP',
+      pickupRiderId: null,
+      createdAt: { lt: retryCutoff },
+    },
+    select: { id: true, orderNumber: true, createdAt: true },
+    take: 10,
+  });
+
+  for (const o of pendingOrders) {
+    const activeDispatch = await prisma.dispatch.findFirst({
+      where: { orderId: o.id, kind: 'RIDER_PICKUP', status: 'ACTIVE' },
+    });
+    if (activeDispatch) continue;
+
+    const dispatches = await prisma.dispatch.findMany({
+      where: { orderId: o.id, kind: 'RIDER_PICKUP' },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+
+    const recentExhausted = dispatches[0];
+    if (recentExhausted && recentExhausted.status === 'EXHAUSTED' && recentExhausted.exhaustedAt) {
+      const exhaustedAgeSeconds = dayjs(now).diff(dayjs(recentExhausted.exhaustedAt), 'second');
+      if (exhaustedAgeSeconds < 120) continue;
+    }
+
+    if (dispatches.length < 5) {
+      logger.info({ orderId: o.id, orderNumber: o.orderNumber, attempt: dispatches.length + 1 }, 'dispatch: auto-retrying pickup rider search');
+      await addEvent(prisma, o.id, {
+        type: 'DISPATCH',
+        title: 'Auto-retrying rider search',
+        description: `Re-checking for nearby available riders (attempt ${dispatches.length + 1})`,
+      });
+      await startRiderDispatch(o.id, 'PICKUP', { includeRefused: true, restartActive: true }).catch((err) =>
+        logger.warn({ err, orderId: o.id }, 'auto-retry pickup dispatch failed'),
+      );
+    } else if (dayjs(o.createdAt).isBefore(escalationCutoff)) {
+      await notifyAdmins({
+        title: 'CRITICAL: Rider Search Exhausted',
+        message: `Order ${o.orderNumber} placed over 10m ago has NO rider assigned after 5 auto-retries. Please assign manually!`,
+        type: 'RIDER',
+        data: { orderId: o.id, critical: true },
+      });
+    }
+  }
+}
+
 export async function sweepDispatches() {
   const now = new Date();
   await flagLateVendorSearches(now).catch((err) => logger.error({ err }, 'late vendor flag failed'));
+  await flagLateRiderSearches(now).catch((err) => logger.error({ err }, 'late rider flag failed'));
+  await retryUnassignedRiderOrders(now).catch((err) => logger.error({ err }, 'retry rider dispatch failed'));
   const due = await prisma.dispatch.findMany({
     where: { status: 'ACTIVE', expiresAt: { lt: now } },
     select: { id: true, kind: true, currentOfferId: true, orderId: true },
